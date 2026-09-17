@@ -139,6 +139,33 @@ input {
 .stamp.done span { font-size: 9px; margin-top: 2px; color: var(--color-primary); text-align: center; line-height: 1.1; }
 .stamp .qs { color: #cfc6b0; font-weight: 700; }
 
+/* Sellos SVG/imagen */
+.stamp-svg,
+.stamp-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+.big-stamp-svg,
+.big-stamp-img-wrap {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  background: #eef4fa;
+}
+.big-stamp-svg img,
+.big-stamp-img-wrap img {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+}
+
 .big-stamp { font-size: 56px; margin-bottom: 6px; }
 
 /* ---- stands list ---- */
@@ -236,6 +263,10 @@ textarea {
 body[data-stamp='estampilla'] .stamp { border-radius: 8px; border-style: solid; }
 body[data-stamp='cuadrado'] .stamp { border-radius: 14px; }
 /* 'circular' y 'redondo' usan el redondo por defecto */
+body[data-stamp='estampilla'] .stamp-svg { border-radius: 8px; }
+body[data-stamp='cuadrado'] .stamp-svg { border-radius: 14px; }
+body[data-stamp='estampilla'] .big-stamp-svg { border-radius: 8px; }
+body[data-stamp='cuadrado'] .big-stamp-svg { border-radius: 14px; }
 
 /* ---- footer configurable ---- */
 .site-footer { max-width: 560px; margin: 0 auto; padding: 0 14px 10px; text-align: center; }

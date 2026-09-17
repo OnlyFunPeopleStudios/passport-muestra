@@ -133,8 +133,18 @@ function standFormHtml() {
         <div><label>Curso / año</label><input name="course" maxlength="60" placeholder="Ej: 3° A"></div>
         <div><label>Área</label><input name="area" maxlength="60" placeholder="Ej: Tecnología"></div>
         <div><label>País / bandera (ISO, ej: AR)</label><input name="flag" maxlength="4" placeholder="AR"></div>
-        <div><label>Icono del sello (opcional)</label><input name="stamp_icon" maxlength="8" placeholder="🌱"></div>
+        <div><label>Tipo de sello</label>
+          <select name="stamp_type">
+            <option value="flag">Bandera (SVG por código ISO)</option>
+            <option value="icon">Icono/emoji</option>
+            <option value="image">Imagen personalizada</option>
+            <option value="color">Solo color</option>
+          </select></div>
+        <div><label>Icono del sello (opcional, para tipo icon)</label><input name="stamp_icon" maxlength="8" placeholder="🌱"></div>
         <div><label>Color del sello</label><input name="stamp_color" type="color" value="#0f4c81"></div>
+        <div><label>Imagen del sello (para tipo image, máx 200 KB)</label>
+          <input type="file" name="stamp_image_file" accept="image/png,image/svg+xml,image/webp,image/jpeg">
+          <span class="muted small">Se convertirá a data URL</span></div>
         <div><label>Orden</label><input name="sort_order" type="number" value="0"></div>
         <div><label><input name="is_published" type="checkbox" checked> Activo en la muestra</label></div>
       </div>
@@ -177,8 +187,20 @@ async function renderStands() {
   const form = document.getElementById('stand-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries(new FormData(form).entries());
+    const formData = new FormData(form);
+    const body = Object.fromEntries(formData.entries());
     body.is_published = form.is_published.checked;
+
+    // Convertir archivo de imagen a data URL si se subió
+    const file = formData.get('stamp_image_file');
+    if (file && file.size > 0) {
+      if (file.size > 200 * 1024) return toast('Imagen del sello: máximo 200 KB', 'bad');
+      if (!/^image\/(png|svg\+xml|webp|jpeg)$/.test(file.type)) return toast('Formato no permitido (PNG/SVG/WebP/JPG)', 'bad');
+      body.stamp_image = await fileToDataURL(file);
+    }
+    // El campo file no va al servidor
+    delete body.stamp_image_file;
+
     try {
       if (editingId) {
         await api('/api/admin/stands/' + editingId, { method: 'PUT', body: JSON.stringify(body) });
@@ -195,6 +217,15 @@ async function renderStands() {
       if (err.status !== 401) toast(err.message, 'bad');
     }
   });
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
   document.getElementById('stand-new').addEventListener('click', () => {
     form.reset();
     form.is_published.checked = true;
@@ -220,7 +251,7 @@ async function renderStands() {
           Object.entries({
             name: stand.name, course: stand.course ?? '', area: stand.area ?? '',
             description: stand.description ?? '', flag: stand.flag ?? '',
-            stamp_icon: stand.stamp_icon ?? '', stamp_color: stand.stamp_color || '#0f4c81', sort_order: stand.sort_order ?? 0,
+            stamp_icon: stand.stamp_icon ?? '', stamp_color: stand.stamp_color || '#0f4c81', stamp_type: stand.stamp_type || 'flag', sort_order: stand.sort_order ?? 0,
           }).forEach(([k, v]) => (form[k] ? (form[k].value = v) : null));
           form.is_published.checked = !!stand.is_published;
           form.scrollIntoView({ behavior: 'smooth' });

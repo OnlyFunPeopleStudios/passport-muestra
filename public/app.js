@@ -23,7 +23,31 @@ const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
 // ---------- configuración del evento ----------
 let cfg = null;
 const t = (key, fallback) => cfg?.texts?.[key] || fallback;
-const stampIcon = (s) => s.stamp_icon || flagEmoji(s.flag);
+
+// Renderiza el sello según stamp_type: 'flag' (SVG), 'icon' (emoji/icono), 'image' (data URL), 'color' (solo color)
+function renderStamp(s, className = 'stamp') {
+  const type = s.stamp_type || 'flag';
+  const color = s.stamp_color || '';
+  const styleAttr = color ? ` style="border-color:${color}"` : '';
+  const baseClass = `stamp ${className}`.trim();
+
+  if (type === 'flag') {
+    // Bandera SVG desde /stamps/{code}.svg
+    const code = (s.flag || '').toLowerCase();
+    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"><img src="/stamps/${code}.svg" alt="" class="stamp-svg">${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
+  }
+  if (type === 'image' && s.stamp_image) {
+    // Imagen subida (data URL)
+    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"><img src="${esc(s.stamp_image)}" alt="" class="stamp-img">${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
+  }
+  if (type === 'icon') {
+    // Icono/emoji personalizado
+    const icon = s.stamp_icon || flagEmoji(s.flag);
+    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}">${esc(icon)}<span>${esc(s.stand_name.split(' ')[0])}</span>${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
+  }
+  // type === 'color' o fallback: solo círculo de color
+  return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"${color ? ` style="background:${color}"` : ''}>${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
+}
 
 async function loadConfig() {
   try {
@@ -120,9 +144,8 @@ async function renderPassport() {
     const stamps = Array.from({ length: total }, (_, i) => i + 1)
       .map((id) => {
         const v = data.visits.find((x) => x.stand_id === id);
-        const style = v?.stamp_color ? ` style="border-color:${v.stamp_color}"` : '';
         return v
-          ? `<div class="stamp done"${style} title="${esc(v.stand_name)}">${stampIcon(v)}<span>${esc(v.stand_name.split(' ')[0])}</span>${v.rating ? `<i class="stamp-stars">${'★'.repeat(v.rating)}</i>` : ''}</div>`
+          ? renderStamp(v)
           : `<div class="stamp"><span class="qs">?</span></div>`;
       })
       .join('');
@@ -192,14 +215,33 @@ async function visitStand(tok) {
   }
 }
 
+// Sello grande para pantallas de visita/evaluación
+function renderBigStamp(v) {
+  const type = v.stamp_type || 'flag';
+  const color = v.stamp_color || '';
+  const styleAttr = color ? ` style="border-color:${color}"` : '';
+  if (type === 'flag') {
+    const code = (v.flag || '').toLowerCase();
+    return `<div class="big-stamp-svg"${styleAttr}><img src="/stamps/${code}.svg" alt="" class="big-stamp-img"></div>`;
+  }
+  if (type === 'image' && v.stamp_image) {
+    return `<div class="big-stamp-img-wrap"${styleAttr}><img src="${esc(v.stamp_image)}" alt="" class="big-stamp-img"></div>`;
+  }
+  if (type === 'icon') {
+    const icon = v.stamp_icon || flagEmoji(v.flag);
+    return `<div class="big-stamp"${styleAttr}>${esc(icon)}</div>`;
+  }
+  return `<div class="big-stamp"${color ? ` style="background:${color}"` : ''}></div>`;
+}
+
 function showVisitSuccess(data) {
   const v = data.visit;
   const done = data.visits.length;
   const total = data.total_stands;
-  ev = { tok: lastTok, name: v.stand_name, flag: v.flag, rating: 0 };
+  ev = { tok: lastTok, name: v.stand_name, flag: v.flag, stamp_type: v.stamp_type, stamp_image: v.stamp_image, stamp_color: v.stamp_color, rating: 0 };
   $view.innerHTML = `
     <section class="card center">
-      <div class="big-stamp">${flagEmoji(v.flag)}</div>
+      ${renderBigStamp(v)}
       <h2>✓ ${esc(v.stand_name)}</h2>
       <p class="muted small">${esc(t('visit_ok', 'Visita registrada'))} · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
     </section>
@@ -208,11 +250,11 @@ function showVisitSuccess(data) {
 }
 
 function showAlreadyVisited(visit) {
-  ev = { tok: lastTok, name: visit.stand_name, flag: visit.flag, rating: 0 };
+  ev = { tok: lastTok, name: visit.stand_name, flag: visit.flag, stamp_type: visit.stamp_type, stamp_image: visit.stamp_image, stamp_color: visit.stamp_color, rating: 0 };
   const has = visit && visit.rating;
   $view.innerHTML = `
     <section class="card center">
-      <div class="big-stamp">${flagEmoji(visit.flag)}</div>
+      ${renderBigStamp(visit)}
       <h2>✓ Ya visitaste este stand</h2>
       <p>${esc(t('already_visited', 'Este stand ya forma parte de tu pasaporte.'))}</p>
       ${has ? `
@@ -232,7 +274,7 @@ function showAlreadyVisited(visit) {
 function showEvalForExisting() {
   $view.innerHTML = `
     <section class="card center">
-      <div class="big-stamp">${flagEmoji(ev.flag)}</div>
+      ${renderBigStamp(ev)}
       <h2>${esc(ev.name)}</h2>
     </section>
     ${evalFormHtml()}`;

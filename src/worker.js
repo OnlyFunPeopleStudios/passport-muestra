@@ -214,7 +214,7 @@ async function passport(db, visitorToken) {
   const { results: visits } = await db
     .prepare(
       `SELECT v.stand_id, v.rating, v.comment, v.created_at,
-              s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color
+              s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image
        FROM visits v JOIN stands s ON s.id = v.stand_id
        WHERE v.visitor_id = ? ORDER BY v.id`
     )
@@ -235,7 +235,7 @@ async function standStats(db) {
     await db
       .prepare(
         `SELECT s.id, s.slug, s.name, s.course, s.description, s.area, s.flag, s.token,
-                s.stamp_icon, s.stamp_color, s.sort_order, s.is_published,
+                s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image, s.sort_order, s.is_published,
                 COALESCE(v.visits, 0) visits, COALESCE(v.evals, 0) evals,
                 v.avg_rating, COALESCE(v.comments, 0) comments
          FROM stands s
@@ -278,7 +278,7 @@ export default {
     if (method === 'GET' && path === '/api/stands') {
       const { results } = await db
         .prepare(
-          `SELECT id, slug, name, course, description, area, flag, token, stamp_icon, stamp_color
+          `SELECT id, slug, name, course, description, area, flag, token, stamp_icon, stamp_color, stamp_type, stamp_image
            FROM stands WHERE is_published = 1 ORDER BY sort_order, id`
         )
         .all();
@@ -302,7 +302,7 @@ export default {
         .first();
       if (!visitor) return json({ error: 'pasaporte no encontrado' }, 404);
       const stand = await db
-        .prepare('SELECT id, name, flag, token FROM stands WHERE token = ? AND is_published = 1')
+        .prepare('SELECT id, name, flag, token, stamp_type, stamp_image FROM stands WHERE token = ? AND is_published = 1')
         .bind(String(body.tok ?? ''))
         .first();
       if (!stand) return json({ error: 'stand no encontrado' }, 404);
@@ -313,12 +313,12 @@ export default {
           .run();
       } catch (err) {
         if (/UNIQUE constraint/i.test(err.message)) {
-          const existing = await db
+const existing = await db
             .prepare(
               `SELECT v.rating, v.comment, v.created_at,
-                      s.name AS stand_name, s.flag, s.id AS stand_id
-               FROM visits v JOIN stands s ON s.id = v.stand_id
-               WHERE v.visitor_id = ? AND v.stand_id = ?`
+                       s.name AS stand_name, s.flag, s.id AS stand_id, s.stamp_type, s.stamp_image
+                FROM visits v JOIN stands s ON s.id = v.stand_id
+                WHERE v.visitor_id = ? AND v.stand_id = ?`
             )
             .bind(visitor.id, stand.id)
             .first();
@@ -327,7 +327,7 @@ export default {
         return json({ error: 'no se pudo registrar la visita' }, 500);
       }
       const data = await passport(db, visitor.token);
-      data.visit = { stand_id: stand.id, stand_name: stand.name, flag: stand.flag };
+      data.visit = { stand_id: stand.id, stand_name: stand.name, flag: stand.flag, stamp_type: stand.stamp_type, stamp_image: stand.stamp_image };
       return json(data, 201);
     }
 
@@ -462,7 +462,9 @@ export default {
     }
 
     if (method === 'GET' && path === '/api/admin/stands') {
-      return json({ stands: await standStats(db) });
+      const stands = await standStats(db);
+      // standStats ya incluye stamp_type y stamp_image por el SELECT *
+      return json({ stands });
     }
 
     if (method === 'POST' && path === '/api/admin/stands') {
@@ -471,15 +473,17 @@ export default {
       if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
       const slug = (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stand') + '-' + Date.now().toString(36);
       const token = crypto.randomUUID();
+      const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
+      const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
-          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), Number(b.sort_order) || 0
+          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0
         )
         .run();
       return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
@@ -497,15 +501,17 @@ export default {
           name = cleanText(b.name, 60);
           if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
         }
+        const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
+        const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
         await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
-                    is_published = ?, stamp_icon = ?, stamp_color = ?, sort_order = ? WHERE id = ?`
+                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ? WHERE id = ?`
           )
           .bind(
             name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
             cleanText(b.flag, 4) || '🌍', b.is_published === false ? 0 : 1,
-            cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), Number(b.sort_order) || 0, id
+            cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0, id
           )
           .run();
         return json({ ok: true });

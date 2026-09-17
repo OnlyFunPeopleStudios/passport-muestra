@@ -1,8 +1,8 @@
 # Passport Muestra
 
-**Pasaporte digital para la Muestra Escolar — 28 de Octubre de 2026.**
+**Pasaporte digital a medida de tu evento.** El visitante crea su pasaporte desde el celular (sin instalar nada), recorre los stands, escanea su QR con la cámara y cada stand le sella el pasaporte. Puntúa con estrellas ⭐ y deja comentarios. Los organizadores personalizan todo el evento (nombre, colores, logo, sellos, textos) y lo ven en el **Centro de Mando** (`/admin`) con estadísticas, moderación y exportación CSV.
 
-El visitante crea su pasaporte desde el celular (sin instalar nada), recorre los stands, escanea su QR con la cámara y cada stand le sella la **bandera de su país** en el pasaporte. Después puntúa con estrellas y deja un comentario. Los organizadores ven todo en el **Centro de Mando** (próximamente) y exportan los datos a Excel.
+Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nuevo.
 
 ## Estado del proyecto
 
@@ -10,7 +10,7 @@ El visitante crea su pasaporte desde el celular (sin instalar nada), recorre los
 |---|---|
 | **V0.1** | ✅ Loop básico: crear visitante, 15 stands seed, QR generable/imprimible, escaneo, sello, anti-duplicado `UNIQUE(visitor_id, stand_id)` |
 | **V0.2** | ✅ Puntuación ⭐ 1–5 + comentario 💬 (validados en el worker, una evaluación por stand) |
-| V0.3 | ⏳ Centro de Mando (estadísticas + moderación) |
+| **V0.3** | ✅ Centro de Mando: configuración del evento (identidad, paleta, presets, logo, sellos, textos), CRUD de stands, estadísticas, moderación de comentarios, visitantes, export CSV |
 | V0.4 | ⏳ Exportación CSV/XLSX + banderas SVG |
 | V0.5 | ⏳ Seguridad, pruebas y deploy en Cloudflare |
 
@@ -49,16 +49,16 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migrations/0001_init.sql)
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 y 0002)
 npm run db:seed    # carga 15 stands de prueba
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
 npm run dev        # sirve en http://localhost:8787
 ```
 
-Probar el loop completo (API), incluidos los casos de duplicados y de validación de evaluaciones:
+Probar el loop completo (API), incluidos los casos de duplicados, validaciones y toda la configuración V0.3:
 
 ```bash
-pwsh -NoProfile -File scripts/smoke.ps1
+npm test
 ```
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
@@ -73,32 +73,46 @@ Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 
 6. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
 7. Volver a escanear el mismo stand → «Este stand ya forma parte de tu pasaporte.» (HTTP 409, garantizado por `UNIQUE` en la DB). Mostrará tu evaluación si ya la dejaste, o un botón **Evaluar ahora** si no.
 
+### Centro de Mando (`/admin`)
+
+Los organizadores entran a `/admin` y tienen:
+
+- **📊 Resumen**: totales (visitantes, sellos, stands activos, evaluaciones, promedio ⭐), ranking de stands, actividad reciente y exportación rápida.
+- **🏫 Stands**: crear, editar, reordenar, activar/desactivar, regenerar QR y eliminar (borrado lógico: se ocultan conservando visitas y evaluaciones).
+- **🎨 Diseño y marca**: nombre, subtítulo, institución, descripción, **paleta de colores** (6 presets), **logo** del evento, estilo del sello (circular/estampilla/cuadrado) y todos los textos de la app. Todo con **vista previa en vivo**; nada cambia hasta tocar **Guardar**.
+- **💬 Comentarios**: marcar como revisado ✅, ocultar/mostrar 👁️ o borrar 🗑️ (borrar el comentario conserva la valoración).
+- **🧑‍🎓 Visitantes**: lista con progreso y última actividad.
+- **⚙️ Configuración**: exportación CSV de visitas y resumen, y protección del panel.
+
+Todo lo guardado se refleja **al instante** en la app pública (colores, textos, sellos).
+
 ## Variables de entorno
 
-No hay secretos en V0.1. En V0.3 el Centro de Mando agregará una contraseña de administración como variable de entorno (`ADMIN_PASSWORD`).
+- `ADMIN_PASSWORD` (opcional): si está seteada, el Centro de Mando y sus endpoints exigen esa contraseña (cookie HttpOnly con hash SHA-256). Sin configurar, el panel queda abierto en desarrollo. En producción: `wrangler secret put ADMIN_PASSWORD`.
 
 ## Base de datos
 
 DB: D1 (SQLite). Migraciones en `migrations/`, seed en `seed/`.
 
 ```
-stands   (id, slug, name, course, description, area, flag, is_published, token)
-visitors (id, name, token)
-visits   (id, visitor_id, stand_id, rating, comment, is_hidden, created_at)
-         UNIQUE (visitor_id, stand_id)   ← anti-duplicados
+event_config (id=1: nombre, subtítulo, institución, descripción, logo, 6 colores, stamp_style, texts_json)
+stands    (id, slug, name, course, description, area, flag, is_published, token, stamp_icon, stamp_color, sort_order)
+visitors  (id, name, token)
+visits    (id, visitor_id, stand_id, rating, comment, is_hidden, is_reviewed, created_at)
+          UNIQUE (visitor_id, stand_id)   ← anti-duplicados
 ```
 
-La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`). El front lo muestra como emoji por ahora; en V0.4 se cambiará a SVG sin tocar la DB.
+Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
 
 ### Crear / editar stands
 
-Por ahora los stands viven en el seed (SQL). La administración CRUD de stands llega en V0.3. Para regenerar el token de un stand (por ejemplo si un QR se perdió o se expone):
+Desde **Stands** del Centro de Mando. Para regenerar el token de un stand desde la consola (por ejemplo si un QR se perdió):
 
 ```bash
 wrangler d1 execute passport-db --local --command "UPDATE stands SET token = 'nuevo-token' WHERE id = 1"
 ```
 
-Después regenerar el QR desde **🖨️ QR**.
+Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 
 ## API
 
@@ -106,18 +120,36 @@ Después regenerar el QR desde **🖨️ QR**.
 |---|---|---|
 | POST | `/api/visitors` | Crea visitante `{ name? }` → `{ visitor }` (token del pasaporte) |
 | GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso) |
+| GET | `/api/config` | Configuración pública del evento (identidad, colores, sellos, textos con fallback) |
 | GET | `/api/passport?vt=` | Pasaporte del visitante (sellos + progreso) |
 | POST | `/api/visits` | `{ vt, tok }` → sella el stand. 409 si ya fue visitado (devuelve la evaluación existente) |
 | POST | `/api/evaluate` | `{ vt, tok, rating, comment }` → evalúa un stand ya visitado. Valida: rating entero 1–5, comentario ≤200 caracteres, trim, filtro de lenguaje. 400/404 si los datos no son válidos |
+
+**Admin** (requieren `ADMIN_PASSWORD` si está seteada; cookie HttpOnly):
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/api/admin/login` / `/api/admin/logout` | Sesión del Centro de Mando |
+| GET | `/api/admin/config` / `PUT` | Leer / guardar configuración completa (logo incluido) |
+| GET | `/api/admin/dashboard` | Totales + ranking de stands + actividad reciente |
+| GET/POST | `/api/admin/stands` | Listar (con stats) / crear stand |
+| PUT/DELETE | `/api/admin/stands/:id` | Editar / eliminar (lógico) |
+| POST | `/api/admin/stands/:id/token` | Regenerar token (QR nuevo) |
+| GET | `/api/admin/comments` | Comentarios para moderar |
+| POST | `/api/admin/comments/:id/hide` / `review` / `delete` | Ocultar / marcar revisado / borrar (conserva la valoración) |
+| GET | `/api/admin/visitors` | Visitantes con progreso |
+| GET | `/api/admin/export/visits.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
 
 ## Deployment futuro en Cloudflare
 
 1. `npx wrangler login`
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
 3. `npx wrangler d1 execute passport-db --remote --file=migrations/0001_init.sql`
-4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
-5. `npx wrangler deploy`
-6. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
+4. `npx wrangler d1 execute passport-db --remote --file=migrations/0002_admin_config.sql`
+5. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
+6. `wrangler secret put ADMIN_PASSWORD`
+7. `npx wrangler deploy`
+8. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
 
 ## Assets y licencias
 
@@ -131,6 +163,6 @@ Después regenerar el QR desde **🖨️ QR**.
 
 - **V0.1** ✅ crear visitante → stand → QR → escaneo → sello → anti-duplicado.
 - **V0.2** ✅ estrellas ⭐ 1–5 + comentario (máx. 200 caracteres, contador, trim, filtro básico de lenguaje, una evaluación por stand, todo validado en el Worker).
-- **V0.3**: Centro de Mando (totales, ranking por stand, últimas visitas, moderación de comentarios, CRUD de stands, regenerar QR).
-- **V0.4**: exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
-- **V0.5**: pruebas reales, seguridad y deploy en Cloudflare con `pasaporte.onlyfunpeople.com.ar`.
+- **V0.3** ✅ Centro de Mando: evento personalizable (motor único), presets de paleta, logo, sellos, textos, CRUD de stands, moderación de comentarios, visitantes, export CSV.
+- **V0.4** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
+- **V0.5** ⏳ pruebas reales, seguridad y deploy en Cloudflare con `pasaporte.onlyfunpeople.com.ar`.

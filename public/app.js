@@ -20,6 +20,47 @@ const flagEmoji = (code) =>
 
 const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
 
+// ---------- configuración del evento ----------
+let cfg = null;
+const t = (key, fallback) => cfg?.texts?.[key] || fallback;
+const stampIcon = (s) => s.stamp_icon || flagEmoji(s.flag);
+
+async function loadConfig() {
+  try {
+    const { config } = await api('/api/config');
+    cfg = config;
+    const s = document.documentElement.style;
+    s.setProperty('--color-primary', config.primary_color);
+    s.setProperty('--color-secondary', config.secondary_color);
+    s.setProperty('--color-accent', config.accent_color);
+    s.setProperty('--color-background', config.background_color);
+    s.setProperty('--color-text', config.text_color);
+    s.setProperty('--color-text-secondary', config.text_secondary_color);
+    document.body.dataset.stamp = config.stamp_style;
+    const nameEl = document.getElementById('event-name');
+    if (nameEl) nameEl.textContent = config.event_name.trim() || 'Pasaporte Digital';
+    const subEl = document.getElementById('event-subtitle');
+    if (subEl) subEl.textContent = config.event_subtitle;
+    document.title = config.event_name.trim() + ' · Pasaporte Digital';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', config.primary_color);
+    const logo = document.getElementById('top-logo');
+    const icon = document.getElementById('top-logo-icon');
+    if (config.logo && logo) {
+      logo.src = config.logo;
+      logo.classList.remove('hidden');
+      icon.classList.add('hidden');
+    }
+    const footer = document.getElementById('site-footer');
+    if (footer && config.texts.footer_text) {
+      footer.textContent = config.texts.footer_text;
+      footer.classList.remove('hidden');
+    }
+  } catch {
+    cfg = null;
+  }
+  if (cfg) route(); // la config llegó después del primer render
+}
+
 // ---------- routing ----------
 function route() {
   const hash = (location.hash || '#/').replace(/^#/, '');
@@ -37,13 +78,13 @@ function renderHome() {
   $view.innerHTML = `
     <section class="card">
       <h2>Bienvenido</h2>
-      <p class="muted">Recorré los stands, sellá tu pasaporte con sus banderas y contanos qué te pareció.</p>
+      <p class="muted">${esc(t('welcome_text', 'Recorré los stands, sellá tu pasaporte y contanos qué te pareció.'))}</p>
       ${hasVt ? `<button class="btn" onclick="location.hash='#/passport'">Ver mi pasaporte</button><p class="muted small">Tu pasaporte de este teléfono ya existe.</p>` : ''}
       <form id="create-form" class="mt">
-        <label for="name">Tu nombre o apodo <span class="muted">(opcional)</span></label>
+        <label for="name">${esc(t('name_label', 'Tu nombre o apodo'))} <span class="muted">(opcional)</span></label>
         <input id="name" name="name" maxlength="40" placeholder="Ej: Lucía">
-        <button class="btn primary" type="submit">Crear mi pasaporte</button>
-        <p class="muted small">Sin nombre = modo anónimo 🕶️</p>
+        <button class="btn primary" type="submit">${esc(t('button_text', 'Crear mi pasaporte'))}</button>
+        <p class="muted small">${esc(t('create_anon_hint', 'Sin nombre = modo anónimo 🕶️'))}</p>
       </form>
     </section>
     <section class="card">
@@ -79,19 +120,20 @@ async function renderPassport() {
     const stamps = Array.from({ length: total }, (_, i) => i + 1)
       .map((id) => {
         const v = data.visits.find((x) => x.stand_id === id);
+        const style = v?.stamp_color ? ` style="border-color:${v.stamp_color}"` : '';
         return v
-          ? `<div class="stamp done" title="${esc(v.stand_name)}">${flagEmoji(v.flag)}<span>${esc(v.stand_name.split(' ')[0])}</span>${v.rating ? `<i class="stamp-stars">${'★'.repeat(v.rating)}</i>` : ''}</div>`
+          ? `<div class="stamp done"${style} title="${esc(v.stand_name)}">${stampIcon(v)}<span>${esc(v.stand_name.split(' ')[0])}</span>${v.rating ? `<i class="stamp-stars">${'★'.repeat(v.rating)}</i>` : ''}</div>`
           : `<div class="stamp"><span class="qs">?</span></div>`;
       })
       .join('');
     $view.innerHTML = `
       <section class="card">
-        <h2>Mi pasaporte ${data.visitor.name ? '· ' + esc(data.visitor.name) : ''}</h2>
+        <h2>${esc(t('passport_title', 'Mi pasaporte'))} ${data.visitor.name ? '· ' + esc(data.visitor.name) : ''}</h2>
         <div class="progress">
           <div class="progress-fill" style="width:${percent}%"></div>
         </div>
-        <p class="progress-text"><strong>${done} / ${total}</strong> stands visitados · <strong>${percent}%</strong> completado</p>
-        ${done === total ? '<p class="banner-complete">🎉 ¡Pasaporte completo! ¡Felicitaciones!</p>' : ''}
+        <p class="progress-text"><strong>${done} / ${total}</strong> ${esc(t('progress_suffix', 'stands visitados'))} · <strong>${percent}%</strong> completado</p>
+        ${done === total ? `<p class="banner-complete">${esc(t('completed', '¡Pasaporte completo! ¡Felicitaciones!'))}</p>` : ''}
         <div class="stamps">${stamps}</div>
       </section>
       <div class="row mt">
@@ -159,7 +201,7 @@ function showVisitSuccess(data) {
     <section class="card center">
       <div class="big-stamp">${flagEmoji(v.flag)}</div>
       <h2>✓ ${esc(v.stand_name)}</h2>
-      <p class="muted small">Visita registrada · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
+      <p class="muted small">${esc(t('visit_ok', 'Visita registrada'))} · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
     </section>
     ${evalFormHtml()}`;
   bindEval();
@@ -172,13 +214,13 @@ function showAlreadyVisited(visit) {
     <section class="card center">
       <div class="big-stamp">${flagEmoji(visit.flag)}</div>
       <h2>✓ Ya visitaste este stand</h2>
-      <p>${esc(visit.stand_name)} ya forma parte de tu pasaporte.</p>
+      <p>${esc(t('already_visited', 'Este stand ya forma parte de tu pasaporte.'))}</p>
       ${has ? `
         <div class="ev-summary">
           <div class="stars static">${'★'.repeat(visit.rating)}${'☆'.repeat(5 - visit.rating)}</div>
           ${visit.comment ? `<p class="quote">"${esc(visit.comment)}"</p>` : '<p class="muted small">Sin comentario</p>'}
         </div>` : `
-        <p class="muted">Todavía no evaluaste este stand.</p>
+        <p class="muted">${esc(t('not_evaluated', 'Evaluá el stand cuando quieras.'))}</p>
         <button class="btn primary mt" onclick="showEvalForExisting()">Evaluar ahora</button>`}
       <div class="row mt">
         <button class="btn ghost" onclick="location.hash='#/passport'">Ver pasaporte</button>
@@ -203,12 +245,12 @@ let ev = { tok: null, name: '', flag: '', rating: 0 };
 function evalFormHtml() {
   return `
     <section class="card">
-      <h3>¿Cómo te gustó este proyecto?</h3>
+      <h3>${esc(t('eval_question', '¿Cómo te gustó este proyecto?'))}</h3>
       <div class="stars" id="stars">${starButtons()}</div>
-      <label for="comment">¿Querés dejar un comentario? <span class="muted">(opcional)</span></label>
+      <label for="comment">${esc(t('comment_label', '¿Querés dejar un comentario?'))} <span class="muted">(opcional)</span></label>
       <textarea id="comment" maxlength="200" rows="3" placeholder="Decinos qué te pareció…"></textarea>
       <p class="counter"><span id="count">0</span>/200</p>
-      <button id="submit-eval" class="btn primary" disabled onclick="submitEval()">Enviar</button>
+      <button id="submit-eval" class="btn primary" disabled onclick="submitEval()">${esc(t('submit_eval', 'Enviar'))}</button>
     </section>`;
 }
 
@@ -249,7 +291,7 @@ async function submitEval() {
     $view.innerHTML = `
       <section class="card center">
         <div class="big-stamp">${flagEmoji(ev.flag)}</div>
-        <h2>✓ Evaluación guardada</h2>
+        <h2>✓ ${esc(t('eval_saved', 'Evaluación guardada'))}</h2>
         <p>Tu pasaporte ahora tiene este sello · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
         <div class="stars static">${'★'.repeat(ev.rating)}${'☆'.repeat(5 - ev.rating)}</div>
         <div class="row mt">
@@ -267,8 +309,8 @@ async function submitEval() {
 function renderScan() {
   $view.innerHTML = `
     <section class="card">
-      <h2>Escanear stand</h2>
-      <p class="muted">Apuntá la cámara al QR del stand.</p>
+      <h2>${esc(t('scan_title', 'Escanear stand'))}</h2>
+      <p class="muted">${esc(t('scan_note', 'Apuntá la cámara al QR del stand.'))}</p>
       <div id="reader"></div>
       <p id="scan-note" class="muted small"></p>
       <button class="btn ghost mt" onclick="location.hash='#/stands'">No tengo cámara · ver lista</button>
@@ -333,3 +375,4 @@ function downloadQr(tok, slug) {
 }
 
 route();
+loadConfig();

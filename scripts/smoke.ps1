@@ -5,7 +5,7 @@ param([string]$Base = 'http://localhost:8787')
 $ErrorActionPreference = 'Stop'
 
 function Invoke-Api($Method, $Path, $Body) {
-  $params = @{ Uri = "$Base$Path"; Method = $Method; UseBasicParsing = $true }
+  $params = @{ Uri = "$Base$Path"; Method = $Method; UseBasicParsing = $true; TimeoutSec = 20 }
   if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json); $params.ContentType = 'application/json' }
   try {
     $r = Invoke-WebRequest @params
@@ -117,6 +117,99 @@ Check 'Extra: profanity filtrado -> ***' ($x.ok -and $v7.comment -match '\*{3}' 
 # Una evaluación por stand: pasaporte de B sigue con 4 visitas
 $pf = Invoke-Api GET "/api/passport?vt=$vte" $null
 Check 'evaluaciones no crean visitas (siguen 4)' ($pf.data.visits.Count -eq 4)
+
+# ---------- V0.3: configuración + centro de mando ----------
+Write-Host ""
+Write-Host "== V0.3 (configuración y centro de mando) ==" -ForegroundColor Cyan
+
+# 1. GET /api/config público
+$cfg = Invoke-Api GET '/api/config' $null
+Check '1. GET /api/config -> 200 con event_name' ($cfg.ok -and $cfg.data.config.event_name.Length -gt 0)
+
+# 2. PUT /api/admin/config actualiza identidad
+$saved = Invoke-Api PUT '/api/admin/config' @{ config = @{ event_name = 'Feria de Ciencias 2026'; event_subtitle = '24 de Noviembre'; stamp_style = 'estampilla' } }
+$c2 = Invoke-Api GET '/api/config' $null
+Check '2. actualizar identidad -> persiste' ($saved.ok -and $c2.data.config.event_name -eq 'Feria de Ciencias 2026' -and $c2.data.config.stamp_style -eq 'estampilla')
+
+# 3. Colores custom
+$r = Invoke-Api PUT '/api/admin/config' @{ config = @{ primary_color = '#123456'; accent_color = '#ff0000' } }
+$c3 = Invoke-Api GET '/api/config' $null
+Check '3. colores guardados' ($r.ok -and $c3.data.config.primary_color -eq '#123456' -and $c3.data.config.accent_color -eq '#ff0000')
+
+# 4. Color inválido -> fallback a default (no rompe la app)
+$r = Invoke-Api PUT '/api/admin/config' @{ config = @{ primary_color = 'rojo' } }
+$c4 = Invoke-Api GET '/api/config' $null
+Check '4. color inválido -> fallback' ($r.ok -and $c4.data.config.primary_color -eq '#0f4c81')
+
+# 5. Textos custom + textos por defecto completan
+$r = Invoke-Api PUT '/api/admin/config' @{ config = @{ texts = @{ welcome_text = 'Bienvenidos!'; footer_text = 'Hecho con cariño' } } }
+$c5 = Invoke-Api GET '/api/config' $null
+Check '5. textos custom + restantes por defecto' ($r.ok -and $c5.data.config.texts.welcome_text -eq 'Bienvenidos!' -and $c5.data.config.texts.footer_text -eq 'Hecho con cariño' -and $c5.data.config.texts.progress_suffix -eq 'stands visitados')
+
+# 6. CRUD stand: crear
+$ns = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand de Prueba V0.3'; course = '6°'; flag = 'CL'; sort_order = 99 }
+Check '6. crear stand -> 201' ($ns.ok -and $ns.status -eq 201)
+$nsId = $ns.data.stand.id
+$nsTok = $ns.data.stand.token
+
+# 7. Editar stand
+$up = Invoke-Api PUT "/api/admin/stands/$nsId" @{ name = 'Stand de Prueba Renombrado'; is_published = $true }
+$s2 = Invoke-Api GET '/api/stands' $null
+$visSt = $s2.data.stands | Where-Object { $_.id -eq $nsId }
+Check '7. editar stand -> se refleja en público' ($up.ok -and $visSt.name -eq 'Stand de Prueba Renombrado')
+
+# 8. Visitar el stand nuevo (activo)
+$vv = Invoke-Api POST '/api/visitors' @{ name = 'Prueba Baja' }
+$nv = Invoke-Api POST '/api/visits' @{ vt = $vv.data.visitor.token; tok = $nsTok }
+Check '8. visitar stand creado -> 201' ($nv.ok -and $nv.status -eq 201)
+
+# 9. Desactivar: se oculta del público, conserva la visita
+$off = Invoke-Api PUT "/api/admin/stands/$nsId" @{ name = 'Stand de Prueba Renombrado'; is_published = $false }
+$s4 = Invoke-Api GET '/api/stands' $null
+$p9 = Invoke-Api GET "/api/passport?vt=$($vv.data.visitor.token)" $null
+Check '9. desactivar -> oculto, visita conservada' ($off.ok -and ($s4.data.stands | Where-Object { $_.id -eq $nsId }).Count -eq 0 -and $p9.data.visits.Count -ge 1)
+
+# 10. Eliminar (lógico) -> conserva visitas/evaluaciones
+$del = Invoke-Api DELETE "/api/admin/stands/$nsId" $null
+$p10 = Invoke-Api GET "/api/passport?vt=$($vv.data.visitor.token)" $null
+Check '10. eliminar (lógico) -> conserva visitas' ($del.ok -and $p10.data.visits.Count -ge 1)
+
+# 11. Dashboard admin
+$dash = Invoke-Api GET '/api/admin/dashboard' $null
+Check '11. dashboard -> totals + stands con stats' ($dash.ok -and $dash.data.totals.visitors -gt 0 -and $dash.data.stands.Count -gt 0)
+
+# 12. Comentarios: listado + moderación (ocultar/mostrar/revisar, no borra rating)
+$com = Invoke-Api GET '/api/admin/comments' $null
+$cid = ($com.data.comments | Where-Object { $_.comment -match 'Me encantó' } | Select-Object -First 1 -ExpandProperty id)
+$hid = Invoke-Api POST "/api/admin/comments/$cid/hide" @{}
+$sho = Invoke-Api POST "/api/admin/comments/$cid/hide" @{}
+$rev = Invoke-Api POST "/api/admin/comments/$cid/review" @{}
+$p12 = Invoke-Api GET "/api/passport?vt=$vte" $null
+$v12 = VisitOf $p12 1
+Check '12. moderación -> ok y conserva rating' ($hid.ok -and $sho.ok -and $rev.ok -and $v12.rating -eq 5)
+
+# 13. Visitantes (admin)
+$adm = Invoke-Api GET '/api/admin/visitors' $null
+Check '13. lista de visitantes con progreso' ($adm.ok -and $adm.data.visitors.Count -gt 0)
+
+# 14. Export CSV
+$csvA = Invoke-WebRequest -Uri "$Base/api/admin/export/visitas.csv" -UseBasicParsing
+$csvB = Invoke-WebRequest -Uri "$Base/api/admin/export/summary.csv" -UseBasicParsing
+Check '14. export CSV (visitas + resumen)' ($csvA.StatusCode -eq 200 -and $csvB.StatusCode -eq 200 -and $csvA.Content -match 'comentario' -and $csvB.Content -match 'promedio')
+
+# 15. Login (dev abierto sin ADMIN_PASSWORD)
+$lg = Invoke-Api POST '/api/admin/login' @{ password = 'x' }
+Check '15. login admin OK (dev abierto)' ($lg.ok)
+
+# Restaurar configuración demo "Muestra Escolar 2026"
+Invoke-Api PUT '/api/admin/config' @{
+  config = @{
+    event_name = 'Muestra Escolar 2026'; event_subtitle = 'Muestra de los y las estudiantes';
+    stamp_style = 'circular'; logo = $null
+  }
+} | Out-Null
+$cfgEnd = Invoke-Api GET '/api/config' $null
+Check 'restaurar configuración demo' ($cfgEnd.data.config.event_name -eq 'Muestra Escolar 2026')
 
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })

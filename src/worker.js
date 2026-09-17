@@ -1,9 +1,10 @@
 // Passport Muestra - API (Cloudflare Worker + D1)
-// V0.2: visitantes, stands, visitas con anti-duplicado UNIQUE(visitor_id, stand_id),
-//       evaluación: puntuación 1-5 + comentario (validados en el worker).
+// V0.3: mismo motor, distinto evento. Configuración del evento + Centro de Mando.
+// Se mantiene V0.1 (visitas) y V0.2 (evaluaciones). Admin opcional con contraseña.
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+const text = (data, headers = { 'content-type': 'text/plain; charset=utf-8' }) => new Response(data, { headers });
 
 const COMMENT_MAX = 200;
 // Filtro básico de lenguaje inapropiado (censura simple, no IA).
@@ -16,13 +17,131 @@ const sanitizeName = (name) => {
 };
 
 // Valida y limpia un comentario. Devuelve '' si no hay comentario válido.
-// `out` recibe el error de validación (longitud) o null.
 function sanitizeComment(raw) {
   if (raw == null) return '';
   const trimmed = String(raw).trim();
   if (trimmed.length > COMMENT_MAX) return '__TOO_LONG__';
   return trimmed.replace(BAD_WORDS, '***');
 }
+
+// ---------- Configuración del evento ----------
+
+const STAMP_STYLES = ['circular', 'redondo', 'estampilla', 'cuadrado'];
+const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const DATA_URL_RE = /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
+const LOGO_MAX = 300_000; // ~225 KB en base64
+
+const DEFAULTS = {
+  event_name: 'Muestra Escolar 2026',
+  event_subtitle: 'Recorré los stands y completá tu pasaporte',
+  institution_name: '',
+  description: '',
+  primary_color: '#0f4c81',
+  secondary_color: '#e8b54d',
+  accent_color: '#d64545',
+  background_color: '#f7f3ea',
+  text_color: '#22303c',
+  text_secondary_color: '#6b7a86',
+  stamp_style: 'circular',
+  texts: {
+    welcome_text: 'Recorré los stands, sellá tu pasaporte y contanos qué te pareció.',
+    button_text: 'Crear mi pasaporte',
+    footer_text: '',
+    name_label: 'Tu nombre o apodo',
+    create_anon_hint: 'Sin nombre = modo anónimo 🕶️',
+    passport_title: 'Mi pasaporte',
+    scan_title: 'Escanear stand',
+    scan_note: 'Apuntá la cámara al QR del stand.',
+    visit_ok: 'Visita registrada',
+    already_visited: 'Este stand ya forma parte de tu pasaporte.',
+    not_evaluated: 'Evaluá el stand cuando quieras.',
+    eval_question: '¿Cómo te gustó este proyecto?',
+    comment_label: '¿Querés dejar un comentario?',
+    submit_eval: 'Enviar',
+    eval_saved: '✓ Evaluación guardada',
+    progress_suffix: 'stands visitados',
+    completed: '¡Pasaporte completo! ¡Felicitaciones!',
+  },
+};
+
+const cleanText = (v, max) => {
+  const s = String(v ?? '').trim();
+  return s.length > max ? s.slice(0, max) : s;
+};
+
+function cleanConfig(cfg) {
+  const color = (key) => (COLOR_RE.test(String(cfg?.[key] ?? '')) ? cfg[key] : DEFAULTS[key]);
+  const texts = { ...DEFAULTS.texts };
+  for (const key of Object.keys(DEFAULTS.texts)) {
+    const v = String(cfg?.texts?.[key] ?? '').trim();
+    if (v) texts[key] = v.slice(0, 300);
+  }
+  let logo = null;
+  const raw = String(cfg?.logo ?? '');
+  if (raw && raw.length <= LOGO_MAX && DATA_URL_RE.test(raw)) logo = raw;
+  return {
+    event_name: cleanText(cfg?.event_name, 80) || DEFAULTS.event_name,
+    event_subtitle: cleanText(cfg?.event_subtitle, 120),
+    institution_name: cleanText(cfg?.institution_name, 120),
+    description: cleanText(cfg?.description, 500),
+    logo,
+    primary_color: color('primary_color'),
+    secondary_color: color('secondary_color'),
+    accent_color: color('accent_color'),
+    background_color: color('background_color'),
+    text_color: color('text_color'),
+    text_secondary_color: color('text_secondary_color'),
+    stamp_style: STAMP_STYLES.includes(cfg?.stamp_style) ? cfg.stamp_style : 'circular',
+    texts,
+  };
+}
+
+async function getConfig(db) {
+  const row = await db.prepare('SELECT * FROM event_config WHERE id = 1').first();
+  if (!row) return { ...DEFAULTS, texts: { ...DEFAULTS.texts } };
+  let cfg = { ...row, texts: {} };
+  try {
+    cfg.texts = JSON.parse(row.texts_json || '{}');
+  } catch {
+    cfg.texts = {};
+  }
+  return cleanConfig(cfg);
+}
+
+// ---------- Auth (admin opcional) ----------
+
+const sha256 = async (s) => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+function cookieValue(req, name) {
+  const m = req.headers.get('cookie')?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+async function isAdmin(req, env) {
+  const pw = env.ADMIN_PASSWORD;
+  if (!pw) return true; // sin contraseña configurada: admin abierto (modo desarrollo)
+  return cookieValue(req, 'admin_auth') === (await sha256(pw));
+}
+
+// ---------- CSV ----------
+
+const csvCell = (v) => {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const csv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+const csvResponse = (rows, filename) =>
+  new Response(csv(rows), {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="${filename}"`,
+    },
+  });
+
+// ---------- Consultas compartidas ----------
 
 async function passport(db, visitorToken) {
   const visitor = await db
@@ -33,7 +152,7 @@ async function passport(db, visitorToken) {
   const { results: visits } = await db
     .prepare(
       `SELECT v.stand_id, v.rating, v.comment, v.created_at,
-              s.name AS stand_name, s.course, s.flag
+              s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color
        FROM visits v JOIN stands s ON s.id = v.stand_id
        WHERE v.visitor_id = ? ORDER BY v.id`
     )
@@ -49,12 +168,35 @@ async function passport(db, visitorToken) {
   };
 }
 
+async function standStats(db) {
+  return (
+    await db
+      .prepare(
+        `SELECT s.id, s.slug, s.name, s.course, s.description, s.area, s.flag, s.token,
+                s.stamp_icon, s.stamp_color, s.sort_order, s.is_published,
+                v.visits, v.evals, v.avg_rating, v.comments
+         FROM stands s
+         LEFT JOIN (
+           SELECT stand_id, COUNT(*) visits, COUNT(rating) evals,
+                  ROUND(AVG(rating), 2) avg_rating, COUNT(comment) comments
+           FROM visits GROUP BY stand_id
+         ) v ON v.stand_id = s.id
+         ORDER BY s.sort_order, s.id`
+      )
+      .all()
+  ).results;
+}
+
+// ---------- Router ----------
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
     const db = env.DB;
+
+    // ---- público: pasaporte del visitante (V0.1 / V0.2) ----
 
     if (method === 'POST' && path === '/api/visitors') {
       const name = sanitizeName((await req.json().catch(() => ({}))).name);
@@ -71,14 +213,17 @@ export default {
     }
 
     if (method === 'GET' && path === '/api/stands') {
-      // Incluye token: el token de un stand es tan público como el QR impreso.
-      // La moderación/admin con contraseña llega en V0.3.
       const { results } = await db
         .prepare(
-          'SELECT id, slug, name, course, description, area, flag, token FROM stands WHERE is_published = 1 ORDER BY id'
+          `SELECT id, slug, name, course, description, area, flag, token, stamp_icon, stamp_color
+           FROM stands WHERE is_published = 1 ORDER BY sort_order, id`
         )
         .all();
       return json({ stands: results });
+    }
+
+    if (method === 'GET' && path === '/api/config') {
+      return json({ config: await getConfig(db) });
     }
 
     if (method === 'GET' && path === '/api/passport') {
@@ -123,8 +268,6 @@ export default {
       return json(data, 201);
     }
 
-    // Evaluación: una por visitante y por stand (la visita ya existe).
-    // El navegador no es confiable: todo se valida acá.
     if (method === 'POST' && path === '/api/evaluate') {
       const body = await req.json().catch(() => ({}));
       const rating = body.rating;
@@ -158,6 +301,225 @@ export default {
       const data = await passport(db, visitor.token);
       data.evaluated = { stand_id: stand.id, stand_name: stand.name, flag: stand.flag };
       return json(data);
+    }
+
+    // ---- admin -----------
+
+    if (method === 'POST' && path === '/api/admin/login') {
+      const { password } = await req.json().catch(() => ({}));
+      const pw = env.ADMIN_PASSWORD;
+      if (pw && password !== pw) return json({ error: 'contraseña incorrecta' }, 401);
+      const token = pw ? await sha256(pw) : 'open';
+      const res = json({ ok: true });
+      res.headers.set(
+        'set-cookie',
+        `admin_auth=${token}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}; HttpOnly${url.protocol === 'https:' ? '; Secure' : ''}`
+      );
+      return res;
+    }
+
+    if (path.startsWith('/api/admin') && !(await isAdmin(req, env))) {
+      return json({ error: 'no autorizado' }, 401);
+    }
+
+    if (method === 'POST' && path === '/api/admin/logout') {
+      const res = json({ ok: true });
+      res.headers.set('set-cookie', 'admin_auth=; Path=/; Max-Age=0');
+      return res;
+    }
+
+    if (method === 'GET' && path === '/api/admin/config') {
+      return json({ config: await getConfig(db) });
+    }
+
+    if (method === 'PUT' && path === '/api/admin/config') {
+      const body = await req.json().catch(() => ({}));
+      const c = cleanConfig(body.config);
+      await db
+        .prepare(
+          `UPDATE event_config SET event_name = ?, event_subtitle = ?, institution_name = ?, description = ?,
+                  logo = ?, primary_color = ?, secondary_color = ?, accent_color = ?, background_color = ?,
+                  text_color = ?, text_secondary_color = ?, stamp_style = ?, texts_json = ?,
+                  updated_at = datetime('now') WHERE id = 1`
+        )
+        .bind(
+          c.event_name, c.event_subtitle, c.institution_name, c.description,
+          c.logo, c.primary_color, c.secondary_color, c.accent_color, c.background_color,
+          c.text_color, c.text_secondary_color, c.stamp_style, JSON.stringify(c.texts)
+        )
+        .run();
+      if (body?.clearLogo) {
+        await db.prepare('UPDATE event_config SET logo = NULL, updated_at = datetime(\'now\') WHERE id = 1').run();
+      }
+      return json({ ok: true, config: await getConfig(db) });
+    }
+
+    if (method === 'GET' && path === '/api/admin/dashboard') {
+      const tot = await db
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM visitors) AS visitors,
+             (SELECT COUNT(*) FROM visits) AS visits,
+             (SELECT COUNT(*) FROM stands WHERE is_published = 1) AS active_stands,
+             (SELECT COUNT(*) FROM visits WHERE rating IS NOT NULL) AS evaluations,
+             (SELECT ROUND(AVG(rating), 2) FROM visits WHERE rating IS NOT NULL) AS avg_rating,
+             (SELECT COUNT(DISTINCT visitor_id) FROM visits WHERE rating IS NOT NULL) AS rated_visitors`
+        )
+        .first();
+      const { results: recent } = await db
+        .prepare(
+          `SELECT v.rating, v.comment, v.created_at, v.is_hidden,
+                  s.name AS stand_name, s.flag AS stand_flag,
+                  COALESCE(vis.name, 'Anónimo') AS visitor_name
+           FROM visits v JOIN stands s ON s.id = v.stand_id
+           LEFT JOIN visitors vis ON vis.id = v.visitor_id
+           ORDER BY v.id DESC LIMIT 12`
+        )
+        .all();
+      return json({
+        totals: tot,
+        pct_evaluated_visitors: tot.visitors ? Math.round((tot.rated_visitors / tot.visitors) * 100) : 0,
+        recent,
+        stands: standStats(db),
+      });
+    }
+
+    if (method === 'GET' && path === '/api/admin/stands') {
+      return json({ stands: await standStats(db) });
+    }
+
+    if (method === 'POST' && path === '/api/admin/stands') {
+      const b = await req.json().catch(() => ({}));
+      const name = cleanText(b.name, 60);
+      if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
+      const slug = (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stand') + '-' + Date.now().toString(36);
+      const token = crypto.randomUUID();
+      const { meta } = await db
+        .prepare(
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
+          cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
+          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), Number(b.sort_order) || 0
+        )
+        .run();
+      return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
+    }
+
+    let m = path.match(/^\/api\/admin\/stands\/(\d+)(?:\/(token))?$/);
+    if (m) {
+      const id = Number(m[1]);
+      if (method === 'PUT' && !m[2]) {
+        const b = await req.json().catch(() => ({}));
+        const cur = await db.prepare('SELECT name FROM stands WHERE id = ?').bind(id).first();
+        if (!cur) return json({ error: 'stand no encontrado' }, 404);
+        let name = cur.name;
+        if (typeof b.name === 'string') {
+          name = cleanText(b.name, 60);
+          if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
+        }
+        await db
+          .prepare(
+            `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
+                    is_published = ?, stamp_icon = ?, stamp_color = ?, sort_order = ? WHERE id = ?`
+          )
+          .bind(
+            name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
+            cleanText(b.flag, 4) || '🌍', b.is_published === false ? 0 : 1,
+            cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), Number(b.sort_order) || 0, id
+          )
+          .run();
+        return json({ ok: true });
+      }
+      if (method === 'DELETE') {
+        // Eliminación lógica: oculta el stand y conserva visitas/evaluaciones.
+        await db.prepare('UPDATE stands SET is_published = 0 WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+      }
+      if (method === 'POST' && m[2] === 'token') {
+        const token = crypto.randomUUID();
+        await db.prepare('UPDATE stands SET token = ? WHERE id = ?').bind(token, id).run();
+        return json({ ok: true, token });
+      }
+    }
+
+    if (method === 'GET' && path === '/api/admin/comments') {
+      const { results } = await db
+        .prepare(
+          `SELECT v.id, v.rating, v.comment, v.created_at, v.is_hidden, v.is_reviewed,
+                  s.name AS stand_name, s.flag AS stand_flag,
+                  COALESCE(vis.name, 'Anónimo') AS visitor_name
+           FROM visits v JOIN stands s ON s.id = v.stand_id
+           LEFT JOIN visitors vis ON vis.id = v.visitor_id
+           WHERE v.comment IS NOT NULL AND v.comment != ''
+           ORDER BY v.id DESC LIMIT 300`
+        )
+        .all();
+      return json({ comments: results });
+    }
+
+    m = path.match(/^\/api\/admin\/comments\/(\d+)\/(hide|review|delete)$/);
+    if (m && method === 'POST') {
+      const id = Number(m[1]);
+      const action = m[2];
+      if (action === 'delete') {
+        // Borra el comentario pero conserva la visita y la valoración.
+        await db.prepare('UPDATE visits SET comment = NULL WHERE id = ?').bind(id).run();
+      } else if (action === 'hide') {
+        const row = await db.prepare('SELECT is_hidden FROM visits WHERE id = ?').bind(id).first();
+        if (row) await db.prepare('UPDATE visits SET is_hidden = ? WHERE id = ?').bind(row.is_hidden ? 0 : 1, id).run();
+      } else if (action === 'review') {
+        const row = await db.prepare('SELECT is_reviewed FROM visits WHERE id = ?').bind(id).first();
+        if (row) await db.prepare('UPDATE visits SET is_reviewed = ? WHERE id = ?').bind(row.is_reviewed ? 0 : 1, id).run();
+      }
+      return json({ ok: true });
+    }
+
+    if (method === 'GET' && path === '/api/admin/visitors') {
+      const { results: visitors } = await db
+        .prepare(
+          `SELECT id, name, token, created_at,
+                  (SELECT COUNT(*) FROM visits v WHERE v.visitor_id = visitors.id) AS visited,
+                  (SELECT MAX(created_at) FROM visits v WHERE v.visitor_id = visitors.id) AS last_activity
+           FROM visitors ORDER BY id DESC LIMIT 500`
+        )
+        .all();
+      const { results: stands } = await db.prepare('SELECT COUNT(*) AS n FROM stands WHERE is_published = 1').all();
+      return json({ visitors, total_stands: stands[0]?.n ?? 0 });
+    }
+
+    if (method === 'GET' && path === '/api/admin/export/visitas.csv') {
+      const { results } = await db
+        .prepare(
+          `SELECT v.id, v.rating, v.comment, v.created_at,
+                  vis.id AS visitor_id, COALESCE(vis.name, 'Anónimo') AS visitor_name, s.name AS stand_name
+           FROM visits v JOIN stands s ON s.id = v.stand_id
+           LEFT JOIN visitors vis ON vis.id = v.visitor_id
+           ORDER BY v.id`
+        )
+        .all();
+      const rows = [['id', 'visitante_id', 'visitante', 'stand', 'fecha', 'rating', 'comentario']];
+      for (const v of results) {
+        rows.push([v.id, v.visitor_id, v.visitor_name, v.stand_name, v.created_at, v.rating ?? '', v.comment ?? '']);
+      }
+      return csvResponse(rows, 'visitas.csv');
+    }
+
+    if (method === 'GET' && path === '/api/admin/export/summary.csv') {
+      const rows = [['stand', 'curso', 'visitas', 'evaluaciones', 'promedio', 'comentarios', 'publicado']];
+      for (const s of await standStats(db)) {
+        rows.push([
+          s.name, s.course ?? '', s.visits ?? 0, s.evals ?? 0, s.avg_rating ?? '', s.comments ?? 0, s.is_published ? 'si' : 'no',
+        ]);
+      }
+      return csvResponse(rows, 'resumen.csv');
+    }
+
+    // ---- admin UI ----
+    if (method === 'GET' && (path === '/admin' || path === '/admin/')) {
+      return env.ASSETS.fetch(new Request(new URL('/admin/index.html', req.url), req));
     }
 
     return env.ASSETS.fetch(req);

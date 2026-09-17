@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f4c81">
-  <title>Pasaporte Digital · Muestra Escolar 28/10</title>
+  <title>Pasaporte Digital</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
@@ -12,15 +12,18 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <span class="logo">🛂</span>
+      <span class="logo" id="top-logo-icon">🛂</span>
+      <img id="top-logo" class="top-logo hidden" alt="logo del evento">
       <div>
-        <h1>PASAPORTE DIGITAL</h1>
-        <p class="subtitle">Muestra Escolar · 28 de Octubre</p>
+        <h1 id="event-name">Pasaporte Digital</h1>
+        <p class="subtitle" id="event-subtitle"></p>
       </div>
     </div>
   </header>
 
   <main id="view" class="view"></main>
+
+  <footer id="site-footer" class="site-footer muted small hidden"></footer>
 
   <nav class="bottombar">
     <a href="#/passport" data-nav="passport">🛂 Pasaporte</a>

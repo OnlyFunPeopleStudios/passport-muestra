@@ -1,4 +1,5 @@
 // Passport Muestra - app cliente (vanilla, hash routing, PWA)
+// V0.2: sello → puntuación ⭐ + comentario 💬
 const $view = document.getElementById('view');
 const VT_KEY = 'pm_vt';
 
@@ -25,7 +26,7 @@ function route() {
   const [path, query] = hash.split('?');
   const params = new URLSearchParams(query || '');
   const go = { '/': renderHome, '/home': renderHome, '/passport': renderPassport, '/stands': renderStands, '/scan': renderScan, '/qr': renderQR }[path];
-  if (path.startsWith('/scan') && params.get('tok')) renderScanResult(params.get('tok'));
+  if (path.startsWith('/scan') && params.get('tok')) visitStand(params.get('tok'));
   else (go || renderHome)();
 }
 window.addEventListener('hashchange', route);
@@ -51,7 +52,7 @@ function renderHome() {
         <li>Creá tu pasaporte (una sola vez).</li>
         <li>En cada stand escaneá su QR.</li>
         <li>La bandera del país queda sellada en tu pasaporte.</li>
-        <li>Puntúa el proyecto con estrellas 💫</li>
+        <li>Puntúa el proyecto con estrellas ⭐ y dejá un comentario si querés.</li>
       </ol>
     </section>`;
   document.getElementById('create-form').addEventListener('submit', async (e) => {
@@ -79,7 +80,7 @@ async function renderPassport() {
       .map((id) => {
         const v = data.visits.find((x) => x.stand_id === id);
         return v
-          ? `<div class="stamp done" title="${esc(v.stand_name)}">${flagEmoji(v.flag)}<span>${esc(v.stand_name.split(' ')[0])}</span></div>`
+          ? `<div class="stamp done" title="${esc(v.stand_name)}">${flagEmoji(v.flag)}<span>${esc(v.stand_name.split(' ')[0])}</span>${v.rating ? `<i class="stamp-stars">${'★'.repeat(v.rating)}</i>` : ''}</div>`
           : `<div class="stamp"><span class="qs">?</span></div>`;
       })
       .join('');
@@ -130,15 +131,136 @@ async function renderStands() {
   }
 }
 
+// ---------- loop: visitar → sellar → evaluar ----------
+let lastTok = null;
+
 // Simula el escaneo (también sirve para probar sin cámara)
 async function visitStand(tok) {
   const vt = localStorage.getItem(VT_KEY);
   if (!vt) { location.hash = '/home'; return; }
+  lastTok = tok;
+  $view.innerHTML = `<section class="card center"><p class="muted">Registrando visita…</p></section>`;
   try {
     const data = await api('/api/visits', { method: 'POST', body: JSON.stringify({ vt, tok }) });
-    showVisitResult(data, false);
+    showVisitSuccess(data);
   } catch (err) {
-    showVisitResult({ error: err.message, already: err.data?.already, visits: null }, true);
+    if (err.data?.already && err.data.visit) showAlreadyVisited(err.data.visit);
+    else
+      $view.innerHTML = `<section class="card center"><h2>No se pudo visitar</h2><p>${esc(err.message)}</p><button class="btn mt" onclick="location.hash='#/stands'">Volver a los stands</button></section>`;
+  }
+}
+
+function showVisitSuccess(data) {
+  const v = data.visit;
+  const done = data.visits.length;
+  const total = data.total_stands;
+  ev = { tok: lastTok, name: v.stand_name, flag: v.flag, rating: 0 };
+  $view.innerHTML = `
+    <section class="card center">
+      <div class="big-stamp">${flagEmoji(v.flag)}</div>
+      <h2>✓ ${esc(v.stand_name)}</h2>
+      <p class="muted small">Visita registrada · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
+    </section>
+    ${evalFormHtml()}`;
+  bindEval();
+}
+
+function showAlreadyVisited(visit) {
+  ev = { tok: lastTok, name: visit.stand_name, flag: visit.flag, rating: 0 };
+  const has = visit && visit.rating;
+  $view.innerHTML = `
+    <section class="card center">
+      <div class="big-stamp">${flagEmoji(visit.flag)}</div>
+      <h2>✓ Ya visitaste este stand</h2>
+      <p>${esc(visit.stand_name)} ya forma parte de tu pasaporte.</p>
+      ${has ? `
+        <div class="ev-summary">
+          <div class="stars static">${'★'.repeat(visit.rating)}${'☆'.repeat(5 - visit.rating)}</div>
+          ${visit.comment ? `<p class="quote">"${esc(visit.comment)}"</p>` : '<p class="muted small">Sin comentario</p>'}
+        </div>` : `
+        <p class="muted">Todavía no evaluaste este stand.</p>
+        <button class="btn primary mt" onclick="showEvalForExisting()">Evaluar ahora</button>`}
+      <div class="row mt">
+        <button class="btn ghost" onclick="location.hash='#/passport'">Ver pasaporte</button>
+        <button class="btn ghost" onclick="location.hash='#/stands'">Ir a otro stand</button>
+      </div>
+    </section>`;
+}
+
+function showEvalForExisting() {
+  $view.innerHTML = `
+    <section class="card center">
+      <div class="big-stamp">${flagEmoji(ev.flag)}</div>
+      <h2>${esc(ev.name)}</h2>
+    </section>
+    ${evalFormHtml()}`;
+  bindEval();
+}
+
+// ---------- formulario de evaluación ----------
+let ev = { tok: null, name: '', flag: '', rating: 0 };
+
+function evalFormHtml() {
+  return `
+    <section class="card">
+      <h3>¿Cómo te gustó este proyecto?</h3>
+      <div class="stars" id="stars">${starButtons()}</div>
+      <label for="comment">¿Querés dejar un comentario? <span class="muted">(opcional)</span></label>
+      <textarea id="comment" maxlength="200" rows="3" placeholder="Decinos qué te pareció…"></textarea>
+      <p class="counter"><span id="count">0</span>/200</p>
+      <button id="submit-eval" class="btn primary" disabled onclick="submitEval()">Enviar</button>
+    </section>`;
+}
+
+function starButtons() {
+  return [1, 2, 3, 4, 5]
+    .map((i) => `<button type="button" class="star" data-v="${i}" onclick="pickStar(${i})">${i <= ev.rating ? '★' : '☆'}</button>`)
+    .join('');
+}
+
+function pickStar(n) {
+  ev.rating = n;
+  document.getElementById('stars').innerHTML = starButtons();
+  document.getElementById('submit-eval').disabled = false;
+}
+
+function bindEval() {
+  const c = document.getElementById('comment');
+  const cnt = document.getElementById('count');
+  c.addEventListener('input', () => { cnt.textContent = c.value.length; });
+  c.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEval(); }
+  });
+}
+
+async function submitEval() {
+  const vt = localStorage.getItem(VT_KEY);
+  const btn = document.getElementById('submit-eval');
+  if (!vt || ev.rating < 1) return;
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  try {
+    const data = await api('/api/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({ vt, tok: ev.tok, rating: ev.rating, comment: document.getElementById('comment').value }),
+    });
+    const done = data.visits.length;
+    const total = data.total_stands;
+    $view.innerHTML = `
+      <section class="card center">
+        <div class="big-stamp">${flagEmoji(ev.flag)}</div>
+        <h2>✓ Evaluación guardada</h2>
+        <p>Tu pasaporte ahora tiene este sello · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
+        <div class="stars static">${'★'.repeat(ev.rating)}${'☆'.repeat(5 - ev.rating)}</div>
+        <div class="row mt">
+          <button class="btn primary" onclick="location.hash='#/scan'">Siguiente stand</button>
+          <button class="btn ghost" onclick="location.hash='#/passport'">Ver pasaporte</button>
+        </div>
+      </section>`;
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+    btn.textContent = 'Enviar';
   }
 }
 
@@ -170,43 +292,6 @@ function renderScan() {
   );
 }
 
-async function renderScanResult(tok, alreadyHandled) {
-  if (tok && !alreadyHandled) { visitStand(tok); return; }
-  $view.innerHTML = `
-    <section class="card center">
-      <h2>${esc((!tok || tok.error) ? 'Oops' : 'Sello agregado')}</h2>
-      <p>${esc((tok && tok.error) || 'Sello listo en tu pasaporte.')}</p>
-      ${tok && tok.error ? '' : ''}
-      <button class="btn primary mt" onclick="location.hash='#/passport'">Ver mi pasaporte</button>
-    </section>`;
-}
-
-function showVisitResult(data, isError) {
-  if (isError) {
-    $view.innerHTML = `
-      <section class="card center">
-        <h2>${data.already ? 'Ya lo tenías' : 'No se pudo visitar'}</h2>
-        <p>${esc(data.error)}</p>
-        <button class="btn primary mt" onclick="location.hash='#/passport'">Ver mi pasaporte</button>
-        <button class="btn ghost mt" onclick="location.hash='#/stands'">Ir a otro stand</button>
-      </section>`;
-    return;
-  }
-  const done = data.visits.length;
-  const total = data.total_stands;
-  $view.innerHTML = `
-    <section class="card center">
-      <div class="big-stamp">${flagEmoji(data.visit.flag)}</div>
-      <h2>✓ ${esc(data.visit.stand_name)}</h2>
-      <p>Sello agregado a tu pasaporte · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
-      <div class="row mt">
-        <button class="btn primary" onclick="location.hash='#/scan'">Seguir escaneando</button>
-        <button class="btn ghost" onclick="location.hash='#/passport'">Ver pasaporte</button>
-      </div>
-    </section>
-    <section class="card center muted">⭐ puntuación y comentarios llegan en la próxima versión.</section>`;
-}
-
 function renderQR() {
   api('/api/stands').then(({ stands }) => {
     $view.innerHTML = `
@@ -216,7 +301,7 @@ function renderQR() {
       </section>
       <div class="qr-grid">
         ${stands.map((s) => `
-          <div class="card qr-card" data-tok="${esc(s.token)}" data-name="${esc(s.name)}">
+          <div class="card qr-card" data-tok="${esc(s.token)}">
             <h3>${esc(s.name)}</h3>
             <div class="qr-img"></div>
             <button class="btn ghost small-btn" onclick="downloadQr('${esc(s.token)}','${esc(s.slug || s.id)}')">⬇️ Descargar</button>

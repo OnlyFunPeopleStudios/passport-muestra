@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "db:init": "wrangler d1 execute passport-db --local --file=migrations/0001_init.sql",
-    "db:seed": "wrangler d1 execute passport-db --local --file=seed/seed.sql"
+    "db:seed": "wrangler d1 execute passport-db --local --file=seed/seed.sql",
+    "db:demo": "wrangler d1 execute passport-db --local --file=seed/seed-data.sql"
   },
   "devDependencies": {
     "html5-qrcode": "^2.3.8",

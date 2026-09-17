@@ -9,7 +9,7 @@ El visitante crea su pasaporte desde el celular (sin instalar nada), recorre los
 | Versión | Estado |
 |---|---|
 | **V0.1** | ✅ Loop básico: crear visitante, 15 stands seed, QR generable/imprimible, escaneo, sello, anti-duplicado `UNIQUE(visitor_id, stand_id)` |
-| V0.2 | ⏳ Puntuación ⭐ y comentarios |
+| **V0.2** | ✅ Puntuación ⭐ 1–5 + comentario 💬 (validados en el worker, una evaluación por stand) |
 | V0.3 | ⏳ Centro de Mando (estadísticas + moderación) |
 | V0.4 | ⏳ Exportación CSV/XLSX + banderas SVG |
 | V0.5 | ⏳ Seguridad, pruebas y deploy en Cloudflare |
@@ -51,10 +51,11 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 npm install
 npm run db:init    # crea el esquema en la DB local (migrations/0001_init.sql)
 npm run db:seed    # carga 15 stands de prueba
+npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
 npm run dev        # sirve en http://localhost:8787
 ```
 
-Probar el loop completo (API):
+Probar el loop completo (API), incluidos los casos de duplicados y de validación de evaluaciones:
 
 ```bash
 pwsh -NoProfile -File scripts/smoke.ps1
@@ -67,9 +68,10 @@ Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 
 1. Abrí `http://localhost:8787` → **Crear mi pasaporte** (nombre opcional).
 2. Desde el menú **🖨️ QR**: generá el QR de cada stand, descargalo e imprimilo para pegarlo en el stand.
 3. Desde el menú **📷 Escanear**: apuntá la cámara al QR de un stand.
-4. El sello (bandera del país del stand) aparece en **🛂 Pasaporte**, con progreso `8 / 15 · 53%`.
-5. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
-6. Volver a escanear el mismo stand → «Este stand ya forma parte de tu pasaporte.» (HTTP 409, garantizado por `UNIQUE` en la DB).
+4. El sello (bandera del país del stand) aparece en **🛂 Pasaporte**, con progreso `8 / 15 · 53%`. En el sello se muestran las estrellas si ya lo evaluaste.
+5. Justo después de visitar un stand se abre la evaluación: **⭐ 1–5** (obligatoria para guardar) + **comentario opcional** (máx. 200 caracteres, con contador y filtro básico de lenguaje).
+6. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
+7. Volver a escanear el mismo stand → «Este stand ya forma parte de tu pasaporte.» (HTTP 409, garantizado por `UNIQUE` en la DB). Mostrará tu evaluación si ya la dejaste, o un botón **Evaluar ahora** si no.
 
 ## Variables de entorno
 
@@ -105,7 +107,8 @@ Después regenerar el QR desde **🖨️ QR**.
 | POST | `/api/visitors` | Crea visitante `{ name? }` → `{ visitor }` (token del pasaporte) |
 | GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso) |
 | GET | `/api/passport?vt=` | Pasaporte del visitante (sellos + progreso) |
-| POST | `/api/visits` | `{ vt, tok }` → sella el stand. 409 si ya fue visitado |
+| POST | `/api/visits` | `{ vt, tok }` → sella el stand. 409 si ya fue visitado (devuelve la evaluación existente) |
+| POST | `/api/evaluate` | `{ vt, tok, rating, comment }` → evalúa un stand ya visitado. Valida: rating entero 1–5, comentario ≤200 caracteres, trim, filtro de lenguaje. 400/404 si los datos no son válidos |
 
 ## Deployment futuro en Cloudflare
 
@@ -127,7 +130,7 @@ Después regenerar el QR desde **🖨️ QR**.
 ## Roadmap
 
 - **V0.1** ✅ crear visitante → stand → QR → escaneo → sello → anti-duplicado.
-- **V0.2**: estrellas ⭐ 1–5 y comentarios con límite de caracteres y filtro básico de lenguaje.
+- **V0.2** ✅ estrellas ⭐ 1–5 + comentario (máx. 200 caracteres, contador, trim, filtro básico de lenguaje, una evaluación por stand, todo validado en el Worker).
 - **V0.3**: Centro de Mando (totales, ranking por stand, últimas visitas, moderación de comentarios, CRUD de stands, regenerar QR).
 - **V0.4**: exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
 - **V0.5**: pruebas reales, seguridad y deploy en Cloudflare con `pasaporte.onlyfunpeople.com.ar`.

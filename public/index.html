@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f4c81">
+  <title>Pasaporte Digital · Muestra Escolar 28/10</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="logo">🛂</span>
+      <div>
+        <h1>PASAPORTE DIGITAL</h1>
+        <p class="subtitle">Muestra Escolar · 28 de Octubre</p>
+      </div>
+    </div>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <nav class="bottombar">
+    <a href="#/passport" data-nav="passport">🛂 Pasaporte</a>
+    <a href="#/scan" data-nav="scan">📷 Escanear</a>
+    <a href="#/stands" data-nav="stands">🏫 Stands</a>
+    <a href="#/qr" data-nav="qr">🖨️ QR</a>
+  </nav>
+
+  <script src="/vendor/html5-qrcode.min.js"></script>
+  <script src="/vendor/qrcode-generator.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

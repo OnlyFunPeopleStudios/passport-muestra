@@ -47,7 +47,8 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({ password: document.getElementById('login-pass').value }),
     });
     if (!r.ok) {
-      err.textContent = 'Contraseña incorrecta';
+      const data = await r.json().catch(() => ({}));
+      err.textContent = data.error || 'Contraseña incorrecta';
       err.classList.remove('hidden');
       return;
     }
@@ -530,8 +531,15 @@ async function renderConfig() {
   $main.innerHTML = `
     <div class="toolbar"><h2>Configuración</h2></div>
     <section class="card">
-      <h3>Proteger el panel</h3>
-      <p class="muted small">El Centro de Mando solo pide contraseña si la configurás. En producción: <code>wrangler secret put ADMIN_PASSWORD</code>. Si no está seteada, el panel queda abierto en desarrollo.</p>
+      <h3>Seguridad</h3>
+      <p class="muted small">Cambiá la contraseña del Centro de Mando (por ejemplo, antes de entregarle el panel a otra persona). Se guarda cifrada: nunca en texto plano.</p>
+      <form id="pw-form" class="form-grid" style="max-width:440px">
+        <div><label>Contraseña actual</label><input type="password" name="current" autocomplete="current-password"></div>
+        <div><label>Nueva contraseña (mínimo 8 caracteres)</label><input type="password" name="next" minlength="8" autocomplete="new-password"></div>
+        <div><label>Repetir nueva contraseña</label><input type="password" name="confirm" minlength="8" autocomplete="new-password"></div>
+        <div><button class="btn primary" type="submit">Cambiar contraseña</button></div>
+      </form>
+      <p class="note">Al cambiarla se cierran las sesiones abiertas, incluida esta. Si olvidás la contraseña, se recupera con la clave de emergencia <code>ADMIN_PASSWORD</code> del servidor (no se muestra acá).</p>
     </section>
     <section class="card">
       <h3>Exportar datos</h3>
@@ -549,10 +557,40 @@ async function renderConfig() {
       <h3>Estado</h3>
       <p class="small">Evento actual: <strong>${esc(c.event_name)}</strong> · estilo del sello: <strong>${esc(c.stamp_style)}</strong> · actualizado ${fmt(c.updated_at)}</p>
     </section>`;
+
+  document.getElementById('pw-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    if (body.next.length < 8) return toast('La nueva contraseña debe tener al menos 8 caracteres.', 'bad');
+    if (body.next !== body.confirm) return toast('Las contraseñas nuevas no coinciden.', 'bad');
+    try {
+      await api('/api/admin/password', { method: 'POST', body: JSON.stringify(body) });
+      toast('Contraseña actualizada correctamente.');
+      showLogin();
+    } catch (err) {
+      if (err.status !== 401) toast(err.message, 'bad');
+    }
+  });
 }
 
 // ---------- inicio ----------
+async function loadBranding() {
+  try {
+    const { config } = await fetch('/api/config').then((r) => r.json());
+    document.getElementById('side-event').textContent = config.event_name;
+    document.getElementById('login-event').textContent =
+      config.event_name + (config.event_subtitle ? ' · ' + config.event_subtitle : '');
+    if (config.logo) {
+      const img = document.getElementById('login-logo');
+      img.src = config.logo;
+      img.classList.remove('hidden');
+      document.getElementById('login-icon').classList.add('hidden');
+    }
+  } catch {}
+}
+
 (async () => {
+  await loadBranding();
   try {
     const { config } = await api('/api/admin/config');
     document.getElementById('side-event').textContent = config.event_name;

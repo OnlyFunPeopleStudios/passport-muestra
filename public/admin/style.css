@@ -50,6 +50,7 @@ body {
   display: flex; flex-direction: column; gap: 10px; text-align: center;
 }
 .login-card .logo { font-size: 40px; }
+.login-logo { max-height: 64px; max-width: 100%; margin: 0 auto; }
 
 /* ---- cards ---- */
 .card {

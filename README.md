@@ -11,6 +11,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | **V0.1** | ✅ Loop básico: crear visitante, 15 stands seed, QR generable/imprimible, escaneo, sello, anti-duplicado `UNIQUE(visitor_id, stand_id)` |
 | **V0.2** | ✅ Puntuación ⭐ 1–5 + comentario 💬 (validados en el worker, una evaluación por stand) |
 | **V0.3** | ✅ Centro de Mando: configuración del evento (identidad, paleta, presets, logo, sellos, textos), CRUD de stands, estadísticas, moderación de comentarios, visitantes, export CSV |
+| **V0.3.1** | ✅ Autenticación del Centro de Mando con contraseña (PBKDF2 + sesión HttpOnly), cambio de contraseña y dashboard estabilizado |
 | V0.4 | ⏳ Exportación CSV/XLSX + banderas SVG |
 | V0.5 | ⏳ Seguridad, pruebas y deploy en Cloudflare |
 
@@ -82,13 +83,32 @@ Los organizadores entran a `/admin` y tienen:
 - **🎨 Diseño y marca**: nombre, subtítulo, institución, descripción, **paleta de colores** (6 presets), **logo** del evento, estilo del sello (circular/estampilla/cuadrado) y todos los textos de la app. Todo con **vista previa en vivo**; nada cambia hasta tocar **Guardar**.
 - **💬 Comentarios**: marcar como revisado ✅, ocultar/mostrar 👁️ o borrar 🗑️ (borrar el comentario conserva la valoración).
 - **🧑‍🎓 Visitantes**: lista con progreso y última actividad.
-- **⚙️ Configuración**: exportación CSV de visitas y resumen, y protección del panel.
+- **⚙️ Configuración**: **Seguridad** (cambiar la contraseña del panel) y exportación CSV de visitas y resumen.
 
 Todo lo guardado se refleja **al instante** en la app pública (colores, textos, sellos).
 
+## Administración
+
+El Centro de Mando (`/admin`) está protegido por contraseña. Se guarda **cifrada** en la base (PBKDF2-SHA256, salt aleatorio, 210 000 iteraciones): nunca en texto plano. La sesión viaja en una cookie **HttpOnly + SameSite=Lax** (y `Secure` en HTTPS) y se invalida al cerrar sesión o al cambiar la contraseña. El visitante nunca ve un login: solo se protege `/api/admin/*`.
+
+### Primer ingreso y contraseña de emergencia
+
+`ADMIN_PASSWORD` es la **clave de arranque y recuperación**:
+
+- Si todavía no hay contraseña guardada, entrás al panel con `ADMIN_PASSWORD`.
+- Si la olvidás, `ADMIN_PASSWORD` siempre te deja entrar para volver a cambiarla.
+
+Se define como variable de entorno (en local `dev.vars`, ignorado por git; en Cloudflare `wrangler secret put ADMIN_PASSWORD`). No se muestra en la interfaz.
+
+Flujo recomendado: entrás con `ADMIN_PASSWORD` → **Configuración → Seguridad** → cambiás la contraseña → esa pasa a ser la del panel.
+
+### Cambiar la contraseña
+
+Desde **Configuración → Seguridad** (contraseña actual, nueva y repetir; mínimo 8 caracteres). Al cambiarla se cierran las sesiones abiertas, incluida la actual: hay que volver a entrar con la nueva. Sirve para entregar el panel a otra persona entre eventos.
+
 ## Variables de entorno
 
-- `ADMIN_PASSWORD` (opcional): si está seteada, el Centro de Mando y sus endpoints exigen esa contraseña (cookie HttpOnly con hash SHA-256). Sin configurar, el panel queda abierto en desarrollo. En producción: `wrangler secret put ADMIN_PASSWORD`.
+- `ADMIN_PASSWORD` (requerida): clave de arranque/recuperación y bootstrap del panel. En local va en `.dev.vars` (ignorado por git); en producción, `wrangler secret put ADMIN_PASSWORD`. La contraseña habitual del día a día se cambia desde **Configuración → Seguridad** y queda cifrada en la DB.
 
 ## Base de datos
 
@@ -100,6 +120,7 @@ stands    (id, slug, name, course, description, area, flag, is_published, token,
 visitors  (id, name, token)
 visits    (id, visitor_id, stand_id, rating, comment, is_hidden, is_reviewed, created_at)
           UNIQUE (visitor_id, stand_id)   ← anti-duplicados
+admin_auth (id=1: password_hash, salt, iterations, session_token, session_expires)   ← contraseña y sesión del panel
 ```
 
 Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
@@ -125,11 +146,13 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | POST | `/api/visits` | `{ vt, tok }` → sella el stand. 409 si ya fue visitado (devuelve la evaluación existente) |
 | POST | `/api/evaluate` | `{ vt, tok, rating, comment }` → evalúa un stand ya visitado. Valida: rating entero 1–5, comentario ≤200 caracteres, trim, filtro de lenguaje. 400/404 si los datos no son válidos |
 
-**Admin** (requieren `ADMIN_PASSWORD` si está seteada; cookie HttpOnly):
+**Admin** (requieren sesión iniciada; cookie HttpOnly):
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/api/admin/login` / `/api/admin/logout` | Sesión del Centro de Mando |
+| POST | `/api/admin/login` | `{ password }` → inicia sesión (401 si es incorrecta) |
+| POST | `/api/admin/logout` | Cierra la sesión |
+| POST | `/api/admin/password` | `{ current, next, confirm }` → cambia la contraseña e invalida las sesiones |
 | GET | `/api/admin/config` / `PUT` | Leer / guardar configuración completa (logo incluido) |
 | GET | `/api/admin/dashboard` | Totales + ranking de stands + actividad reciente |
 | GET/POST | `/api/admin/stands` | Listar (con stats) / crear stand |
@@ -138,7 +161,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | GET | `/api/admin/comments` | Comentarios para moderar |
 | POST | `/api/admin/comments/:id/hide` / `review` / `delete` | Ocultar / marcar revisado / borrar (conserva la valoración) |
 | GET | `/api/admin/visitors` | Visitantes con progreso |
-| GET | `/api/admin/export/visits.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
+| GET | `/api/admin/export/visitas.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
 
 ## Deployment futuro en Cloudflare
 
@@ -146,10 +169,11 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
 3. `npx wrangler d1 execute passport-db --remote --file=migrations/0001_init.sql`
 4. `npx wrangler d1 execute passport-db --remote --file=migrations/0002_admin_config.sql`
-5. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
-6. `wrangler secret put ADMIN_PASSWORD`
-7. `npx wrangler deploy`
-8. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
+5. `npx wrangler d1 execute passport-db --remote --file=migrations/0003_admin_auth.sql`
+6. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
+7. `wrangler secret put ADMIN_PASSWORD`
+8. `npx wrangler deploy`
+9. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
 
 ## Assets y licencias
 
@@ -164,5 +188,6 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.1** ✅ crear visitante → stand → QR → escaneo → sello → anti-duplicado.
 - **V0.2** ✅ estrellas ⭐ 1–5 + comentario (máx. 200 caracteres, contador, trim, filtro básico de lenguaje, una evaluación por stand, todo validado en el Worker).
 - **V0.3** ✅ Centro de Mando: evento personalizable (motor único), presets de paleta, logo, sellos, textos, CRUD de stands, moderación de comentarios, visitantes, export CSV.
+- **V0.3.1** ✅ dashboard estabilizado (contrato de arrays + contadores en 0) y login del Centro de Mando con contraseña cifrada, sesión HttpOnly y cambio de contraseña.
 - **V0.4** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
 - **V0.5** ⏳ pruebas reales, seguridad y deploy en Cloudflare con `pasaporte.onlyfunpeople.com.ar`.

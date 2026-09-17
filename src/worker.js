@@ -108,23 +108,85 @@ async function getConfig(db) {
   return cleanConfig(cfg);
 }
 
-// ---------- Auth (admin opcional) ----------
+// ---------- Auth admin (contraseña persistente + sesión) ----------
 
-const sha256 = async (s) => {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-};
+const COOKIE = 'admin_session';
+const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+const PBKDF2_ITERATIONS = 210000;
+
+const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 function cookieValue(req, name) {
   const m = req.headers.get('cookie')?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-async function isAdmin(req, env) {
-  const pw = env.ADMIN_PASSWORD;
-  if (!pw) return true; // sin contraseña configurada: admin abierto (modo desarrollo)
-  return cookieValue(req, 'admin_auth') === (await sha256(pw));
+async function pbkdf2(password, saltB64, iterations) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations },
+    key,
+    256
+  );
+  return b64(bits);
 }
+
+function timingSafe(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const getAuth = (db) => db.prepare('SELECT * FROM admin_auth WHERE id = 1').first();
+
+// Válida si coincide con la contraseña guardada o con ADMIN_PASSWORD (arranque/recuperación).
+async function verifyPassword(db, env, password) {
+  if (!password) return false;
+  const auth = await getAuth(db);
+  if (auth?.password_hash && auth?.salt) {
+    if (timingSafe(await pbkdf2(password, auth.salt, auth.iterations || PBKDF2_ITERATIONS), auth.password_hash)) return true;
+  }
+  return Boolean(env.ADMIN_PASSWORD) && timingSafe(password, env.ADMIN_PASSWORD);
+}
+
+async function setPassword(db, password) {
+  const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS);
+  await db
+    .prepare(
+      `UPDATE admin_auth SET password_hash = ?, salt = ?, iterations = ?,
+              session_token = NULL, session_expires = NULL, updated_at = datetime('now') WHERE id = 1`
+    )
+    .bind(hash, salt, PBKDF2_ITERATIONS)
+    .run();
+}
+
+async function startSession(db) {
+  const token = b64(crypto.getRandomValues(new Uint8Array(32)));
+  const expires = Date.now() + SESSION_MS;
+  await db
+    .prepare("UPDATE admin_auth SET session_token = ?, session_expires = ?, updated_at = datetime('now') WHERE id = 1")
+    .bind(token, expires)
+    .run();
+  return { token, expires };
+}
+
+const endSession = (db) =>
+  db.prepare('UPDATE admin_auth SET session_token = NULL, session_expires = NULL WHERE id = 1').run();
+
+// Punto único de control: todo /api/admin/* (salvo login/logout) pasa por acá.
+async function requireAdmin(req, db) {
+  const token = cookieValue(req, COOKIE);
+  if (!token) return false;
+  const auth = await getAuth(db);
+  return Boolean(auth?.session_token) && Number(auth.session_expires) > Date.now() && timingSafe(token, auth.session_token);
+}
+
+const sessionCookie = (token, expires, secure) =>
+  `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor((expires - Date.now()) / 1000)}${secure ? '; Secure' : ''}`;
+const clearCookie = (secure) => `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
 
 // ---------- CSV ----------
 
@@ -174,7 +236,8 @@ async function standStats(db) {
       .prepare(
         `SELECT s.id, s.slug, s.name, s.course, s.description, s.area, s.flag, s.token,
                 s.stamp_icon, s.stamp_color, s.sort_order, s.is_published,
-                v.visits, v.evals, v.avg_rating, v.comments
+                COALESCE(v.visits, 0) visits, COALESCE(v.evals, 0) evals,
+                v.avg_rating, COALESCE(v.comments, 0) comments
          FROM stands s
          LEFT JOIN (
            SELECT stand_id, COUNT(*) visits, COUNT(rating) evals,
@@ -307,24 +370,38 @@ export default {
 
     if (method === 'POST' && path === '/api/admin/login') {
       const { password } = await req.json().catch(() => ({}));
-      const pw = env.ADMIN_PASSWORD;
-      if (pw && password !== pw) return json({ error: 'contraseña incorrecta' }, 401);
-      const token = pw ? await sha256(pw) : 'open';
+      if (!(await verifyPassword(db, env, String(password ?? '')))) {
+        return json({ error: 'Contraseña incorrecta.' }, 401);
+      }
+      const { token, expires } = await startSession(db);
       const res = json({ ok: true });
-      res.headers.set(
-        'set-cookie',
-        `admin_auth=${token}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}; HttpOnly${url.protocol === 'https:' ? '; Secure' : ''}`
-      );
+      res.headers.set('set-cookie', sessionCookie(token, expires, url.protocol === 'https:'));
       return res;
     }
 
-    if (path.startsWith('/api/admin') && !(await isAdmin(req, env))) {
+    // Logout siempre responde 200: limpia la sesión del servidor y la cookie.
+    if (method === 'POST' && path === '/api/admin/logout') {
+      await endSession(db);
+      const res = json({ ok: true });
+      res.headers.set('set-cookie', clearCookie(url.protocol === 'https:'));
+      return res;
+    }
+
+    if (path.startsWith('/api/admin') && !(await requireAdmin(req, db))) {
       return json({ error: 'no autorizado' }, 401);
     }
 
-    if (method === 'POST' && path === '/api/admin/logout') {
-      const res = json({ ok: true });
-      res.headers.set('set-cookie', 'admin_auth=; Path=/; Max-Age=0');
+    if (method === 'POST' && path === '/api/admin/password') {
+      const b = await req.json().catch(() => ({}));
+      if (!(await verifyPassword(db, env, String(b.current ?? '')))) {
+        return json({ error: 'La contraseña actual no es correcta.' }, 400);
+      }
+      const next = String(b.next ?? '');
+      if (next.length < 8) return json({ error: 'La nueva contraseña debe tener al menos 8 caracteres.' }, 400);
+      if (next !== String(b.confirm ?? '')) return json({ error: 'Las contraseñas nuevas no coinciden.' }, 400);
+      await setPassword(db, next); // invalida la sesión actual
+      const res = json({ ok: true, relogin: true });
+      res.headers.set('set-cookie', clearCookie(url.protocol === 'https:'));
       return res;
     }
 
@@ -380,7 +457,7 @@ export default {
         totals: tot,
         pct_evaluated_visitors: tot.visitors ? Math.round((tot.rated_visitors / tot.visitors) * 100) : 0,
         recent,
-        stands: standStats(db),
+        stands: await standStats(db),
       });
     }
 

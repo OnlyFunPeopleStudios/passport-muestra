@@ -2,4 +2,5 @@ node_modules/
 .wrangler/
 *.log
 devserver.pid
+.dev.vars
 .DS_Store

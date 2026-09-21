@@ -13,10 +13,7 @@ const api = async (path, opts) => {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const flagEmoji = (code) =>
-  code && code.length === 2
-    ? String.fromCodePoint(...Array.from(code.toUpperCase()).map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
-    : '🏳️';
+const flagEmoji = (code) => window.PassportStamp?.flagEmoji(code) || '🏳️';
 
 const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
 
@@ -24,29 +21,9 @@ const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
 let cfg = null;
 const t = (key, fallback) => cfg?.texts?.[key] || fallback;
 
-// Renderiza el sello según stamp_type: 'flag' (SVG), 'icon' (emoji/icono), 'image' (data URL), 'color' (solo color)
-function renderStamp(s, className = 'stamp') {
-  const type = s.stamp_type || 'flag';
-  const color = s.stamp_color || '';
-  const styleAttr = color ? ` style="border-color:${color}"` : '';
-  const baseClass = `stamp ${className}`.trim();
-
-  if (type === 'flag') {
-    // Bandera SVG desde /stamps/{code}.svg
-    const code = (s.flag || '').toLowerCase();
-    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"><img src="/stamps/${code}.svg" alt="" class="stamp-svg">${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
-  }
-  if (type === 'image' && s.stamp_image) {
-    // Imagen subida (data URL)
-    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"><img src="${esc(s.stamp_image)}" alt="" class="stamp-img">${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
-  }
-  if (type === 'icon') {
-    // Icono/emoji personalizado
-    const icon = s.stamp_icon || flagEmoji(s.flag);
-    return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}">${esc(icon)}<span>${esc(s.stand_name.split(' ')[0])}</span>${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
-  }
-  // type === 'color' o fallback: solo círculo de color
-  return `<div class="${baseClass} done"${styleAttr} title="${esc(s.stand_name)}"${color ? ` style="background:${color}"` : ''}>${s.rating ? `<i class="stamp-stars">${'★'.repeat(s.rating)}</i>` : ''}</div>`;
+// Renderiza el sello utilizando el motor único PassportStamp
+function renderStamp(s, opts = {}) {
+  return window.PassportStamp.render(s, typeof opts === 'string' ? { extraClass: opts } : opts);
 }
 
 async function loadConfig() {
@@ -136,19 +113,40 @@ async function renderPassport() {
   const vt = localStorage.getItem(VT_KEY);
   if (!vt) { location.hash = '/home'; return; }
   try {
-    const data = await api('/api/passport?vt=' + encodeURIComponent(vt));
-    const visited = new Set(data.visits.map((v) => v.stand_id));
-    const done = visited.size;
-    const total = data.total_stands;
+    const [standsData, data] = await Promise.all([
+      api('/api/stands').catch(() => ({ stands: [] })),
+      api('/api/passport?vt=' + encodeURIComponent(vt)),
+    ]);
+    const visitedMap = new Map((data.visits || []).map((v) => [v.stand_id, v]));
+    const done = visitedMap.size;
+    const total = data.total_stands || standsData.stands.length || 0;
     const percent = pct(done, total);
-    const stamps = Array.from({ length: total }, (_, i) => i + 1)
-      .map((id) => {
-        const v = data.visits.find((x) => x.stand_id === id);
-        return v
-          ? renderStamp(v)
-          : `<div class="stamp"><span class="qs">?</span></div>`;
-      })
-      .join('');
+
+    const publishedStands = standsData.stands || [];
+    const slots = publishedStands.length
+      ? publishedStands
+          .map((s) => {
+            const v = visitedMap.get(s.id);
+            const stampHtml = v
+              ? renderStamp(v, { size: 'normal' })
+              : renderStamp({}, { placeholder: true, size: 'normal' });
+            return `
+              <div class="passport-slot ${v ? 'done' : 'pending'}">
+                ${stampHtml}
+                <span class="passport-slot-name">${esc(s.name)}</span>
+              </div>`;
+          })
+          .join('')
+      : Array.from({ length: total }, (_, i) => i + 1)
+          .map((id) => {
+            const v = data.visits.find((x) => x.stand_id === id);
+            const stampHtml = v
+              ? renderStamp(v, { size: 'normal' })
+              : renderStamp({}, { placeholder: true, size: 'normal' });
+            return `<div class="passport-slot ${v ? 'done' : 'pending'}">${stampHtml}</div>`;
+          })
+          .join('');
+
     $view.innerHTML = `
       <section class="card">
         <h2>${esc(t('passport_title', 'Mi pasaporte'))} ${data.visitor.name ? '· ' + esc(data.visitor.name) : ''}</h2>
@@ -156,8 +154,8 @@ async function renderPassport() {
           <div class="progress-fill" style="width:${percent}%"></div>
         </div>
         <p class="progress-text"><strong>${done} / ${total}</strong> ${esc(t('progress_suffix', 'stands visitados'))} · <strong>${percent}%</strong> completado</p>
-        ${done === total ? `<p class="banner-complete">${esc(t('completed', '¡Pasaporte completo! ¡Felicitaciones!'))}</p>` : ''}
-        <div class="stamps">${stamps}</div>
+        ${done === total && total > 0 ? `<p class="banner-complete">${esc(t('completed', '¡Pasaporte completo! ¡Felicitaciones!'))}</p>` : ''}
+        <div class="passport-grid">${slots}</div>
       </section>
       <div class="row mt">
         <button class="btn primary" onclick="location.hash='#/scan'">📷 Escanear stand</button>
@@ -181,7 +179,7 @@ async function renderStands() {
         ${stands.map((s) => `
           <article class="card stand-card">
             <div class="stand-head">
-              <span class="stand-flag">${flagEmoji(s.flag)}</span>
+              ${renderStamp(s, { size: 'small', showStars: false })}
               <div>
                 <h3>${esc(s.name)}</h3>
                 <p class="muted small">${esc(s.course)} · ${esc(s.area)}</p>
@@ -215,23 +213,9 @@ async function visitStand(tok) {
   }
 }
 
-// Sello grande para pantallas de visita/evaluación
-function renderBigStamp(v) {
-  const type = v.stamp_type || 'flag';
-  const color = v.stamp_color || '';
-  const styleAttr = color ? ` style="border-color:${color}"` : '';
-  if (type === 'flag') {
-    const code = (v.flag || '').toLowerCase();
-    return `<div class="big-stamp-svg"${styleAttr}><img src="/stamps/${code}.svg" alt="" class="big-stamp-img"></div>`;
-  }
-  if (type === 'image' && v.stamp_image) {
-    return `<div class="big-stamp-img-wrap"${styleAttr}><img src="${esc(v.stamp_image)}" alt="" class="big-stamp-img"></div>`;
-  }
-  if (type === 'icon') {
-    const icon = v.stamp_icon || flagEmoji(v.flag);
-    return `<div class="big-stamp"${styleAttr}>${esc(icon)}</div>`;
-  }
-  return `<div class="big-stamp"${color ? ` style="background:${color}"` : ''}></div>`;
+// Sello grande para confirmación visual tras escaneo
+function renderBigStamp(v, animated = true) {
+  return renderStamp(v, { size: 'hero', animated });
 }
 
 function showVisitSuccess(data) {
@@ -240,9 +224,10 @@ function showVisitSuccess(data) {
   const total = data.total_stands;
   ev = { tok: lastTok, name: v.stand_name, flag: v.flag, stamp_type: v.stamp_type, stamp_image: v.stamp_image, stamp_color: v.stamp_color, rating: 0 };
   $view.innerHTML = `
-    <section class="card center">
-      ${renderBigStamp(v)}
-      <h2>✓ ${esc(v.stand_name)}</h2>
+    <section class="card visit-hero-card">
+      ${renderBigStamp(v, true)}
+      <h2>✓ ¡Visitaste este stand!</h2>
+      <h3 class="muted">${esc(v.stand_name)}</h3>
       <p class="muted small">${esc(t('visit_ok', 'Visita registrada'))} · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
     </section>
     ${evalFormHtml()}`;
@@ -331,8 +316,8 @@ async function submitEval() {
     const done = data.visits.length;
     const total = data.total_stands;
     $view.innerHTML = `
-      <section class="card center">
-        <div class="big-stamp">${flagEmoji(ev.flag)}</div>
+      <section class="card visit-hero-card">
+        ${renderStamp({ stand_name: ev.name, flag: ev.flag, stamp_type: ev.stamp_type, stamp_image: ev.stamp_image, stamp_color: ev.stamp_color, rating: ev.rating }, { size: 'hero', animated: true })}
         <h2>✓ ${esc(t('eval_saved', 'Evaluación guardada'))}</h2>
         <p>Tu pasaporte ahora tiene este sello · <strong>${done} / ${total}</strong> (${pct(done, total)}%)</p>
         <div class="stars static">${'★'.repeat(ev.rating)}${'☆'.repeat(5 - ev.rating)}</div>

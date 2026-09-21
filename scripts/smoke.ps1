@@ -94,7 +94,7 @@ Check 'crear visitante -> 201' ($v.ok -and $v.status -eq 201)
 $vt = $v.data.visitor.token
 
 $s = Invoke-Api GET '/api/stands' $null -Cookie ''
-Check 'listar stands -> 15' ($s.ok -and ($s.data.stands).Count -eq 15)
+Check 'listar stands -> 14' ($s.ok -and ($s.data.stands).Count -eq 14)
 $tok1 = $s.data.stands[0].token
 $tok2 = $s.data.stands[1].token
 $tok3 = $s.data.stands[2].token
@@ -341,6 +341,62 @@ $pubCfg = Get-Raw '/api/config' -Cookie ''
 $pubVis = Invoke-Api POST '/api/visitors' @{ name = 'Sin Login V031' } -Cookie ''
 Check '39. /api/config público sin sesión -> 200' ($pubCfg.ok -and $pubCfg.status -eq 200)
 Check '40. visitante público no requiere login -> 201' ($pubVis.ok -and $pubVis.status -eq 201)
+
+# ---------- V0.4: stamps y muestra escolar ----------
+Write-Host ""
+Write-Host "== V0.4 (stamps y muestra escolar) ==" -ForegroundColor Cyan
+
+# 41. Auditoría de assets SVG (13 países requeridos)
+$stampsDir = Join-Path $PSScriptRoot '..\public\stamps'
+$requiredSvg = @('ar', 'br', 'co', 'us', 'mx', 'es', 'it', 'pt', 'gb', 'cn', 'jp', 'eg', 'ma')
+$svgMissing = @($requiredSvg | Where-Object { -not (Test-Path (Join-Path $stampsDir "$_.svg")) })
+Check '41. 13 países SVG presentes en public/stamps' ($svgMissing.Count -eq 0)
+
+# 42. Verificar que los países no requeridos fueron retirados
+$excludedSvg = @('uy', 'cl', 'fr', 'pe', 'de')
+$svgFound = @($excludedSvg | Where-Object { Test-Path (Join-Path $stampsDir "$_.svg") })
+Check '42. SVG no pertenecientes a la muestra retirados' ($svgFound.Count -eq 0)
+
+# 43. Crear stands con los 4 tipos de stamp (flag, icon, image, color)
+$flagStand = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Flag'; flag = 'pt'; stamp_type = 'flag' }
+$iconStand = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Icon'; flag = 'ar'; stamp_type = 'icon'; stamp_icon = '🚀' }
+$dummyImg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PGNpcmNsZSBjeD0iNSIgY3k9IjUiIHI9IjQiIGZpbGw9InJlZCIvPjwvc3ZnPg=='
+$imgStand  = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Image'; flag = 'br'; stamp_type = 'image'; stamp_image = $dummyImg }
+$colStand  = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Color'; flag = 'it'; stamp_type = 'color'; stamp_color = '#e8b54d' }
+Check '43. crear stands con los 4 tipos de sello (flag/icon/image/color) -> 201' ($flagStand.ok -and $iconStand.ok -and $imgStand.ok -and $colStand.ok)
+
+# 44. Verificar que /api/stands devuelve los campos de sello
+$stList = Invoke-Api GET '/api/stands' $null -Cookie ''
+$colFound = @($stList.data.stands) | Where-Object { $_.id -eq $colStand.data.stand.id } | Select-Object -First 1
+Check '44. campos stamp_type, stamp_color presentes en /api/stands' ($null -ne $colFound -and $colFound.stamp_type -eq 'color' -and $colFound.stamp_color -eq '#e8b54d')
+
+# 45. Caso Marruecos: Dos stands independientes con flag = 'ma'
+$ma1 = Invoke-Api POST '/api/admin/stands' @{ name = 'Marruecos — Proyección de videos'; flag = 'ma'; course = '4° A'; area = 'Audiovisual'; stamp_type = 'flag' }
+$ma2 = Invoke-Api POST '/api/admin/stands' @{ name = 'Marruecos — Muestra fotográfica'; flag = 'ma'; course = '4° B'; area = 'Fotografía'; stamp_type = 'flag' }
+Check '45. dos stands de Marruecos creados con flag = ma -> 201' ($ma1.ok -and $ma2.ok -and $ma1.data.stand.id -ne $ma2.data.stand.id)
+
+# 46. Visitante visita ambos stands de Marruecos sin conflicto
+$visMa = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Marruecos' } -Cookie ''
+$vMaTok = $visMa.data.visitor.token
+$v1 = Invoke-Api POST '/api/visits' @{ vt = $vMaTok; tok = $ma1.data.stand.token } -Cookie ''
+$v2 = Invoke-Api POST '/api/visits' @{ vt = $vMaTok; tok = $ma2.data.stand.token } -Cookie ''
+Check '46. visita independiente a ambos stands de Marruecos -> 201' ($v1.ok -and $v2.ok)
+
+# 47. Evaluación independiente a ambos stands de Marruecos
+$ev1 = Invoke-Api POST '/api/evaluate' @{ vt = $vMaTok; tok = $ma1.data.stand.token; rating = 5; comment = 'Excelente video' } -Cookie ''
+$ev2 = Invoke-Api POST '/api/evaluate' @{ vt = $vMaTok; tok = $ma2.data.stand.token; rating = 4; comment = 'Hermosas fotos' } -Cookie ''
+$pMa = Invoke-Api GET "/api/passport?vt=$vMaTok" $null -Cookie ''
+$pMaV1 = $pMa.data.visits | Where-Object { $_.stand_id -eq $ma1.data.stand.id } | Select-Object -First 1
+$pMaV2 = $pMa.data.visits | Where-Object { $_.stand_id -eq $ma2.data.stand.id } | Select-Object -First 1
+Check '47. evaluaciones independientes de Marruecos preservadas con flag=ma' ($ev1.ok -and $ev2.ok -and $pMaV1.rating -eq 5 -and $pMaV2.rating -eq 4 -and $pMaV1.flag -eq 'ma' -and $pMaV2.flag -eq 'ma')
+
+# Cleanup: despublicar los 6 stands creados en esta seccion para que la corrida sea idempotente
+# (mismo patron que los tests 9/10; si no, "listar stands -> 14" falla en la corrida siguiente).
+foreach ($st in @($flagStand, $iconStand, $imgStand, $colStand, $ma1, $ma2)) {
+  if ($st.ok) {
+    Invoke-Api PUT "/api/admin/stands/$($st.data.stand.id)" @{ name = $st.data.stand.name; is_published = $false } | Out-Null
+  }
+}
 
 # Restaurar configuración demo "Muestra Escolar 2026"
 Invoke-Api PUT '/api/admin/config' @{

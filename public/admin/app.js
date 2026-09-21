@@ -124,32 +124,44 @@ async function renderResumen() {
 
 // ---------- Stands ----------
 let editingId = null;
+let currentEditingStand = null;
+let pendingStandImage = null;
+
 function standFormHtml() {
   return `
     <form id="stand-form" class="card">
       <h3 id="stand-form-title">Nuevo stand</h3>
-      <div class="form-grid">
-        <div><label>Nombre *</label><input name="name" maxlength="60" placeholder="Ej: Tecnología Argentina"></div>
-        <div><label>Curso / año</label><input name="course" maxlength="60" placeholder="Ej: 3° A"></div>
-        <div><label>Área</label><input name="area" maxlength="60" placeholder="Ej: Tecnología"></div>
-        <div><label>País / bandera (ISO, ej: AR)</label><input name="flag" maxlength="4" placeholder="AR"></div>
-        <div><label>Tipo de sello</label>
-          <select name="stamp_type">
-            <option value="flag">Bandera (SVG por código ISO)</option>
-            <option value="icon">Icono/emoji</option>
-            <option value="image">Imagen personalizada</option>
-            <option value="color">Solo color</option>
-          </select></div>
-        <div><label>Icono del sello (opcional, para tipo icon)</label><input name="stamp_icon" maxlength="8" placeholder="🌱"></div>
-        <div><label>Color del sello</label><input name="stamp_color" type="color" value="#0f4c81"></div>
-        <div><label>Imagen del sello (para tipo image, máx 200 KB)</label>
-          <input type="file" name="stamp_image_file" accept="image/png,image/svg+xml,image/webp,image/jpeg">
-          <span class="muted small">Se convertirá a data URL</span></div>
-        <div><label>Orden</label><input name="sort_order" type="number" value="0"></div>
-        <div><label><input name="is_published" type="checkbox" checked> Activo en la muestra</label></div>
+      <div class="stand-form-layout">
+        <div class="stand-form-fields">
+          <div class="form-grid">
+            <div><label>Nombre *</label><input name="name" id="sf-name" maxlength="60" placeholder="Ej: Tecnología Argentina"></div>
+            <div><label>Curso / año</label><input name="course" maxlength="60" placeholder="Ej: 3° A"></div>
+            <div><label>Área</label><input name="area" maxlength="60" placeholder="Ej: Tecnología"></div>
+            <div><label>País / bandera (ISO, ej: AR)</label><input name="flag" id="sf-flag" maxlength="4" placeholder="AR"></div>
+            <div><label>Tipo de sello</label>
+              <select name="stamp_type" id="sf-type">
+                <option value="flag">Bandera (SVG por código ISO)</option>
+                <option value="icon">Icono/emoji</option>
+                <option value="image">Imagen personalizada</option>
+                <option value="color">Solo color</option>
+              </select></div>
+            <div><label>Icono del sello (para tipo icon)</label><input name="stamp_icon" id="sf-icon" maxlength="8" placeholder="🌱"></div>
+            <div><label>Color del sello</label><input name="stamp_color" id="sf-color" type="color" value="#0f4c81"></div>
+            <div><label>Imagen del sello (para tipo image, máx 200 KB)</label>
+              <input type="file" name="stamp_image_file" id="sf-file" accept="image/png,image/svg+xml,image/webp,image/jpeg">
+              <span class="muted small">Se convertirá a data URL</span></div>
+            <div><label>Orden</label><input name="sort_order" type="number" value="0"></div>
+            <div><label><input name="is_published" type="checkbox" checked> Activo en la muestra</label></div>
+          </div>
+          <label>Descripción</label>
+          <textarea name="description" maxlength="300" placeholder="Qué van a mostrar…"></textarea>
+        </div>
+        <div class="stand-form-preview-card">
+          <div class="stand-form-preview-label">Vista previa del sello</div>
+          <div id="stand-stamp-preview" class="stand-stamp-preview-box"></div>
+          <span class="muted small">Se actualiza en tiempo real</span>
+        </div>
       </div>
-      <label>Descripción</label>
-      <textarea name="description" maxlength="300" placeholder="Qué van a mostrar…"></textarea>
       <div class="row mt-actions"><button class="btn primary" type="submit">Guardar stand</button>
       <button class="btn ghost" type="button" id="stand-reset">Cancelar edición</button></div>
     </form>`;
@@ -158,16 +170,18 @@ function standFormHtml() {
 async function renderStands() {
   const { stands } = await api('/api/admin/stands');
   editingId = null;
+  currentEditingStand = null;
+  pendingStandImage = null;
   $main.innerHTML = `
     <div class="toolbar"><h2>Stands</h2><button class="btn primary small" id="stand-new">+ Nuevo stand</button></div>
     ${standFormHtml()}
     <section class="card">
       <h3>Listado (${stands.length})</h3>
       <table>
-        <tr><th></th><th>Stand</th><th>Estado</th><th>Visitas</th><th>Eval.</th><th>Prom.</th><th>Acciones</th></tr>
+        <tr><th>Sello</th><th>Stand</th><th>Estado</th><th>Visitas</th><th>Eval.</th><th>Prom.</th><th>Acciones</th></tr>
         ${stands.map((s) => `
           <tr>
-            <td>${flagEmoji(s.flag)}</td>
+            <td>${window.PassportStamp.render(s, { size: 'small', showStars: false })}</td>
             <td>${esc(s.name)}<span class="muted small">${esc(s.course ?? '')} · ${s.sort_order}</span></td>
             <td>${s.is_published ? '<span class="pill on">activo</span>' : '<span class="pill off">inactivo</span>'}</td>
             <td>${s.visits ?? 0}</td><td>${s.evals ?? 0}</td><td>${s.avg_rating ?? '—'}</td>
@@ -185,20 +199,58 @@ async function renderStands() {
     </section>`;
 
   const form = document.getElementById('stand-form');
+  const previewBox = document.getElementById('stand-stamp-preview');
+
+  function updatePreview() {
+    const standData = {
+      name: form.name.value || 'Stand',
+      flag: form.flag.value || '',
+      stamp_type: form.stamp_type.value || 'flag',
+      stamp_icon: form.stamp_icon.value || '',
+      stamp_color: form.stamp_color.value || '#0f4c81',
+      stamp_image: pendingStandImage || currentEditingStand?.stamp_image || null,
+    };
+    if (previewBox) {
+      previewBox.innerHTML = window.PassportStamp.render(standData, { size: 'big' });
+    }
+  }
+
+  // Escuchar cambios en campos que afectan el sello
+  ['sf-name', 'sf-flag', 'sf-type', 'sf-icon', 'sf-color'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', updatePreview);
+    document.getElementById(id)?.addEventListener('change', updatePreview);
+  });
+
+  const fileInput = document.getElementById('sf-file');
+  fileInput?.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (file && file.size > 0) {
+      if (file.size > 200 * 1024) { toast('Imagen del sello: máximo 200 KB', 'bad'); return; }
+      if (!/^image\/(png|svg\+xml|webp|jpeg)$/.test(file.type)) { toast('Formato no permitido (PNG/SVG/WebP/JPG)', 'bad'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingStandImage = reader.result;
+        form.stamp_type.value = 'image';
+        updatePreview();
+      };
+      reader.readAsDataURL(file);
+    } else {
+      pendingStandImage = null;
+      updatePreview();
+    }
+  });
+
+  updatePreview();
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(form);
     const body = Object.fromEntries(formData.entries());
     body.is_published = form.is_published.checked;
 
-    // Convertir archivo de imagen a data URL si se subió
-    const file = formData.get('stamp_image_file');
-    if (file && file.size > 0) {
-      if (file.size > 200 * 1024) return toast('Imagen del sello: máximo 200 KB', 'bad');
-      if (!/^image\/(png|svg\+xml|webp|jpeg)$/.test(file.type)) return toast('Formato no permitido (PNG/SVG/WebP/JPG)', 'bad');
-      body.stamp_image = await fileToDataURL(file);
+    if (pendingStandImage) {
+      body.stamp_image = pendingStandImage;
     }
-    // El campo file no va al servidor
     delete body.stamp_image_file;
 
     try {
@@ -212,32 +264,33 @@ async function renderStands() {
       form.reset();
       form.is_published.checked = true;
       editingId = null;
+      currentEditingStand = null;
+      pendingStandImage = null;
       renderStands();
     } catch (err) {
       if (err.status !== 401) toast(err.message, 'bad');
     }
   });
 
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
   document.getElementById('stand-new').addEventListener('click', () => {
     form.reset();
     form.is_published.checked = true;
     editingId = null;
+    currentEditingStand = null;
+    pendingStandImage = null;
     document.getElementById('stand-form-title').textContent = 'Nuevo stand';
+    updatePreview();
     form.scrollIntoView({ behavior: 'smooth' });
   });
+
   document.getElementById('stand-reset').addEventListener('click', () => {
     form.reset();
     form.is_published.checked = true;
     editingId = null;
+    currentEditingStand = null;
+    pendingStandImage = null;
     document.getElementById('stand-form-title').textContent = 'Nuevo stand';
+    updatePreview();
   });
 
   $main.querySelectorAll('button[data-act]').forEach((b) =>
@@ -247,6 +300,8 @@ function fileToDataURL(file) {
       try {
         if (b.dataset.act === 'edit') {
           editingId = id;
+          currentEditingStand = stand;
+          pendingStandImage = null;
           document.getElementById('stand-form-title').textContent = 'Editar: ' + stand.name;
           Object.entries({
             name: stand.name, course: stand.course ?? '', area: stand.area ?? '',
@@ -254,6 +309,7 @@ function fileToDataURL(file) {
             stamp_icon: stand.stamp_icon ?? '', stamp_color: stand.stamp_color || '#0f4c81', stamp_type: stand.stamp_type || 'flag', sort_order: stand.sort_order ?? 0,
           }).forEach(([k, v]) => (form[k] ? (form[k].value = v) : null));
           form.is_published.checked = !!stand.is_published;
+          updatePreview();
           form.scrollIntoView({ behavior: 'smooth' });
         } else if (b.dataset.act === 'toggle') {
           await api('/api/admin/stands/' + id, { method: 'PUT', body: JSON.stringify({ name: stand.name, is_published: !stand.is_published }) });
@@ -321,12 +377,16 @@ async function renderDiseno() {
             <div><label>Subtítulo</label><input id="event_subtitle" maxlength="120"></div>
             <div><label>Institución</label><input id="institution_name" maxlength="120"></div>
             <div><label>Estilo del sello</label>
-              <select id="stamp_style">
-                <option value="circular">Circular</option>
-                <option value="redondo">Redondo</option>
-                <option value="estampilla">Estampilla</option>
-                <option value="cuadrado">Cuadrado</option>
-              </select></div>
+              <input type="hidden" id="stamp_style" value="${esc(c.stamp_style || 'circular')}">
+              <div class="stamp-style-picker" id="style-picker">
+                ${['circular', 'redondo', 'estampilla', 'cuadrado'].map(st => `
+                  <button type="button" class="stamp-style-card ${c.stamp_style === st ? 'active' : ''}" data-style="${st}">
+                    ${window.PassportStamp.render({ name: 'Argentina', flag: 'ar' }, { style: st, size: 'normal', showStars: false })}
+                    <span class="stamp-style-name">${st.charAt(0).toUpperCase() + st.slice(1)}</span>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
           </div>
           <label>Descripción</label>
           <textarea id="description" maxlength="500"></textarea>
@@ -376,7 +436,7 @@ async function renderDiseno() {
             <div class="pv-card">
               <div class="pv-progress"><i></i></div>
               <p class="small" data-pv="progress">1 / 3 <span class="muted">completado</span></p>
-              <div class="pv-stamps" data-pv="stamps"><div class="pv-stamp done">🇦🇷</div><div class="pv-stamp done">🇧🇷</div><div class="pv-stamp">?</div></div>
+              <div class="pv-stamps" data-pv="stamps"></div>
             </div>
           </div>
         </div>
@@ -416,15 +476,30 @@ async function renderDiseno() {
     pv.querySelector('[data-pv="welcome"]').textContent = get('t_welcome_text', '');
     pv.querySelector('[data-pv="btn"]').textContent = get('t_button_text', '');
     const style = get('stamp_style', 'circular');
-    pv.querySelectorAll('.pv-stamp').forEach((s) => {
-      s.style.borderRadius = style === 'estampilla' ? '8px' : style === 'cuadrado' ? '14px' : '50%';
-    });
+    const stampsContainer = pv.querySelector('[data-pv="stamps"]');
+    if (stampsContainer) {
+      stampsContainer.innerHTML = `
+        ${window.PassportStamp.render({ name: 'Argentina', flag: 'ar' }, { style, size: 'normal', showStars: false })}
+        ${window.PassportStamp.render({ name: 'Brasil', flag: 'br' }, { style, size: 'normal', showStars: false })}
+        ${window.PassportStamp.render({}, { placeholder: true, style, size: 'normal' })}
+      `;
+    }
     const logoEl = pv.querySelector('[data-pv="logo"]');
     if (pendingLogo) { logoEl.src = pendingLogo; logoEl.classList.remove('hidden'); }
     else if (pendingLogo === null) logoEl.classList.add('hidden');
     else if (c.logo) { logoEl.src = c.logo; logoEl.classList.remove('hidden'); }
   }
   paint();
+
+  document.querySelectorAll('.stamp-style-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.stamp-style-card').forEach(x => x.classList.remove('active'));
+      card.classList.add('active');
+      document.getElementById('stamp_style').value = card.dataset.style;
+      paint();
+    });
+  });
+
   ['event_name', 'event_subtitle', 'institution_name', 'description', 'stamp_style',
     'primary_color', 'secondary_color', 'accent_color', 'background_color', 'text_color', 'text_secondary_color',
     ...TEXT_FIELDS.map(([k]) => 't_' + k)].forEach((id) => {

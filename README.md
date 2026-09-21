@@ -12,8 +12,9 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | **V0.2** | ✅ Puntuación ⭐ 1–5 + comentario 💬 (validados en el worker, una evaluación por stand) |
 | **V0.3** | ✅ Centro de Mando: configuración del evento (identidad, paleta, presets, logo, sellos, textos), CRUD de stands, estadísticas, moderación de comentarios, visitantes, export CSV |
 | **V0.3.1** | ✅ Autenticación del Centro de Mando con contraseña (PBKDF2 + sesión HttpOnly), cambio de contraseña y dashboard estabilizado |
-| V0.4 | ⏳ Exportación CSV/XLSX + banderas SVG |
+| V0.4 | ✅ Sellos: 4 tipos (bandera/ícono/imagen/color), banderas SVG de los 13 países y motor único de render |
 | V0.5 | 🟡 Deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar`; pruebas reales pendientes |
+| **V0.6** | ✅ Modo offline del visitante: service worker, catálogo de stands y visitas en el dispositivo, cola de sincronización idempotente |
 
 ## Stack
 
@@ -62,6 +63,8 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
+Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 89 chequeos).
+
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 
 ## Uso
@@ -73,6 +76,16 @@ Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 
 5. Justo después de visitar un stand se abre la evaluación: **⭐ 1–5** (obligatoria para guardar) + **comentario opcional** (máx. 200 caracteres, con contador y filtro básico de lenguaje).
 6. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
 7. Volver a escanear el mismo stand → «Este stand ya forma parte de tu pasaporte.» (HTTP 409, garantizado por `UNIQUE` en la DB). Mostrará tu evaluación si ya la dejaste, o un botón **Evaluar ahora** si no.
+
+### Modo offline
+
+Después de la primera visita **con conexión**, la app sigue funcionando sin Internet (útil en la feria, donde el WiFi de los stands puede fallar):
+
+- El **service worker** (`public/sw.js`) cachea la app, los stands y los sellos; el panel `/admin` y los datos de otros visitantes nunca se cachean.
+- Escanear un stand sin conexión registra la visita en el dispositivo (IndexedDB) y la sella al instante, sin duplicados.
+- Puntuar y comentar también funciona offline.
+- Al recuperar la conexión se **sincroniza sola** (al volver a abrir, al pasar a primer plano o al detectar red). Cada operación lleva un `operation_id` local y el reenvío es idempotente: `UNIQUE(visitor_id, stand_id)` responde 409 en visitas y `/api/evaluate` es un `UPDATE`, así que reintentar nunca duplica ni pierde datos.
+- Un indicador discreto abajo muestra el estado: `● Conectado`, `○ Sin conexión · guardado en este dispositivo` o `↻ N pendientes`.
 
 ### Centro de Mando (`/admin`)
 
@@ -195,3 +208,4 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.3.1** ✅ dashboard estabilizado (contrato de arrays + contadores en 0) y login del Centro de Mando con contraseña cifrada, sesión HttpOnly y cambio de contraseña.
 - **V0.4** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
 - **V0.5** 🟡 deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar` (custom domain + HTTPS); pruebas reales en la feria pendientes.
+- **V0.6** ✅ modo offline del visitante: service worker + Cache API (app, stands, sellos), IndexedDB (catálogo, visitas y cola), sincronización idempotente al recuperar la conexión e indicador de estado. Sin endpoints nuevos: reutiliza `/api/visits` (409 = ya aplicado) y `/api/evaluate` (UPDATE idempotente).

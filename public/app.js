@@ -2,6 +2,7 @@
 // V0.2: sello → puntuación ⭐ + comentario 💬
 const $view = document.getElementById('view');
 const VT_KEY = 'pm_vt';
+const offline = window.PMOffline;
 
 const api = async (path, opts) => {
   const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
@@ -16,6 +17,34 @@ const esc = (s) =>
 const flagEmoji = (code) => window.PassportStamp?.flagEmoji(code) || '🏳️';
 
 const pct = (done, total) => (total ? Math.round((done / total) * 100) : 0);
+
+// ---------- datos compartidos con el modo offline ----------
+// Cuando el servidor responde se guarda una copia en el dispositivo; si no hay
+// red se usa esa copia (los stands para reconocer el QR, las visitas para el pasaporte).
+const mirrorPassport = (vt, data) => Promise.all((data?.visits || []).map((v) => offline.saveVisit(vt, v)));
+
+async function apiStands() {
+  try {
+    const { stands } = await api('/api/stands');
+    await offline.saveStands(stands);
+    return stands;
+  } catch {
+    return offline.getStands();
+  }
+}
+
+async function apiPassport(vt) {
+  const local = await offline.localPassport(vt);
+  try {
+    const data = await api('/api/passport?vt=' + encodeURIComponent(vt));
+    await offline.saveVisitor(vt, data.visitor);
+    await mirrorPassport(vt, data);
+    return { ...data, visits: offline.mergeVisits(data.visits, local.visits) };
+  } catch (err) {
+    if (err.status) throw err; // 404: pasaporte inexistente -> flujo actual
+    return local; // sin red: lo guardado en el dispositivo
+  }
+}
 
 // ---------- configuración del evento ----------
 let cfg = null;
@@ -113,16 +142,12 @@ async function renderPassport() {
   const vt = localStorage.getItem(VT_KEY);
   if (!vt) { location.hash = '/home'; return; }
   try {
-    const [standsData, data] = await Promise.all([
-      api('/api/stands').catch(() => ({ stands: [] })),
-      api('/api/passport?vt=' + encodeURIComponent(vt)),
-    ]);
+    const [publishedStands, data] = await Promise.all([apiStands(), apiPassport(vt)]);
     const visitedMap = new Map((data.visits || []).map((v) => [v.stand_id, v]));
     const done = visitedMap.size;
-    const total = data.total_stands || standsData.stands.length || 0;
+    const total = data.total_stands || publishedStands.length || 0;
     const percent = pct(done, total);
 
-    const publishedStands = standsData.stands || [];
     const slots = publishedStands.length
       ? publishedStands
           .map((s) => {
@@ -169,7 +194,7 @@ async function renderPassport() {
 
 async function renderStands() {
   try {
-    const { stands } = await api('/api/stands');
+    const stands = await apiStands();
     $view.innerHTML = `
       <section class="card">
         <h2>Stands de la muestra</h2>
@@ -205,11 +230,23 @@ async function visitStand(tok) {
   $view.innerHTML = `<section class="card center"><p class="muted">Registrando visita…</p></section>`;
   try {
     const data = await api('/api/visits', { method: 'POST', body: JSON.stringify({ vt, tok }) });
+    await mirrorPassport(vt, data);
     showVisitSuccess(data);
   } catch (err) {
-    if (err.data?.already && err.data.visit) showAlreadyVisited(err.data.visit);
-    else
+    if (err.data?.already && err.data.visit) { showAlreadyVisited(err.data.visit); return; }
+    if (err.status) {
+      // Respuesta del servidor (stand inexistente, etc.): no es un problema de red.
       $view.innerHTML = `<section class="card center"><h2>No se pudo visitar</h2><p>${esc(err.message)}</p><button class="btn mt" onclick="location.hash='#/stands'">Volver a los stands</button></section>`;
+      return;
+    }
+    // Sin conexión: se registra en el dispositivo y se encola para sincronizar.
+    try {
+      const res = await offline.visitOffline(vt, tok);
+      if (res.already) showAlreadyVisited(res.visit);
+      else showVisitSuccess({ visit: res.visit, visits: res.passport.visits, total_stands: res.passport.total_stands });
+    } catch (offErr) {
+      $view.innerHTML = `<section class="card center"><h2>No se pudo visitar</h2><p>${esc(offErr.message)}</p><button class="btn mt" onclick="location.hash='#/stands'">Volver a los stands</button></section>`;
+    }
   }
 }
 
@@ -308,11 +345,19 @@ async function submitEval() {
   if (!vt || ev.rating < 1) return;
   btn.disabled = true;
   btn.textContent = 'Guardando…';
+  const comment = document.getElementById('comment').value;
   try {
-    const data = await api('/api/evaluate', {
-      method: 'POST',
-      body: JSON.stringify({ vt, tok: ev.tok, rating: ev.rating, comment: document.getElementById('comment').value }),
-    });
+    let data;
+    try {
+      data = await api('/api/evaluate', {
+        method: 'POST',
+        body: JSON.stringify({ vt, tok: ev.tok, rating: ev.rating, comment }),
+      });
+      await mirrorPassport(vt, data);
+    } catch (err) {
+      if (err.status) throw err; // validación del servidor: se muestra el mensaje
+      data = await offline.evaluateOffline(vt, ev.tok, ev.rating, comment); // sin conexión
+    }
     const done = data.visits.length;
     const total = data.total_stands;
     $view.innerHTML = `
@@ -406,7 +451,7 @@ function qrPngDataUrl(text, cell = 12, margin = 16) {
 }
 
 function renderQR() {
-  api('/api/stands').then(({ stands }) => {
+  apiStands().then((stands) => {
     $view.innerHTML = `
       <section class="card">
         <h2>QR de cada stand</h2>
@@ -441,3 +486,9 @@ function downloadQr(tok, slug) {
 
 route();
 loadConfig();
+offline.init();
+
+// Modo offline: registra el service worker que cachea la app y los stands.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register(APP_BASE + 'sw.js').catch(() => {});
+}

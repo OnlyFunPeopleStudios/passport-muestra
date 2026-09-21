@@ -458,6 +458,31 @@ $workerSrc = Get-Content (Join-Path $PSScriptRoot '..\src\worker.js') -Raw
 $iterMatch = [regex]::Match($workerSrc, 'PBKDF2_ITERATIONS\s*=\s*(\d+)')
 Check '61. PBKDF2_ITERATIONS <= 100000 (tope de Cloudflare Workers)' ($iterMatch.Success -and [int]$iterMatch.Groups[1].Value -le 100000)
 
+# ---------- V0.6: modo offline del visitante ----------
+Write-Host ""
+Write-Host "== V0.6 (modo offline) ==" -ForegroundColor Cyan
+
+$pub = Join-Path $PSScriptRoot '..\public'
+$swPath = Join-Path $pub 'sw.js'
+$offlinePath = Join-Path $pub 'offline.js'
+$indexPath = Join-Path $pub 'index.html'
+$appPath = Join-Path $pub 'app.js'
+
+Check '62. service worker presente (public/sw.js)' (Test-Path $swPath)
+$swSrc = if (Test-Path $swPath) { Get-Content $swPath -Raw } else { '' }
+$offSrc = if (Test-Path $offlinePath) { Get-Content $offlinePath -Raw } else { '' }
+$idxSrc = if (Test-Path $indexPath) { Get-Content $indexPath -Raw } else { '' }
+$appSrc = if (Test-Path $appPath) { Get-Content $appPath -Raw } else { '' }
+
+Check '63. el SW precachea la app (app.js, offline.js, style.css)' ($swSrc -match "'app\.js'" -and $swSrc -match "'offline\.js'" -and $swSrc -match "'style\.css'")
+Check '64. el SW excluye /api/admin y /admin (panel nunca offline)' ($swSrc -match '/api/admin' -and $swSrc -match "'/admin'")
+Check '65. el SW no cachea el pasaporte del visitante (/api/passport)' ($swSrc -notmatch '/api/passport')
+Check '66. index.html carga offline.js antes de app.js' ($idxSrc -match 'offline\.js"[\s\S]*app\.js"')
+Check '67. app.js registra el service worker' ($appSrc -match 'serviceWorker\.register')
+Check '68. offline.js guarda en IndexedDB y encola con operation_id' ($offSrc -match 'indexedDB\.open' -and $offSrc -match 'operation_id')
+Check '69. offline.js sincroniza reutilizando /api/visits y /api/evaluate' ($offSrc -match "'/api/visits'" -and $offSrc -match "'/api/evaluate'")
+Check '70. offline.js no toca endpoints admin' ($offSrc -notmatch '/api/admin')
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

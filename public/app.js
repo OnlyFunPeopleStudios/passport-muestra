@@ -339,26 +339,45 @@ function renderScan() {
       <h2>${esc(t('scan_title', 'Escanear stand'))}</h2>
       <p class="muted">${esc(t('scan_note', 'Apuntá la cámara al QR del stand.'))}</p>
       <div id="reader"></div>
-      <p id="scan-note" class="muted small"></p>
+      <p id="scan-note" class="muted small">Escaneando…</p>
       <button class="btn ghost mt" onclick="location.hash='#/stands'">No tengo cámara · ver lista</button>
     </section>`;
-  if (!('Html5QrcodeScanner' in window)) {
-    document.getElementById('scan-note').textContent = 'El lector QR no está disponible. Usá la lista de stands.';
+
+  const note = document.getElementById('scan-note');
+  if (!('Html5Qrcode' in window)) {
+    note.textContent = 'El lector QR no está disponible. Usá la lista de stands.';
     return;
   }
   if (!navigator?.mediaDevices?.getUserMedia) {
-    document.getElementById('scan-note').textContent = 'Cámara no disponible (se necesita HTTPS). Usá la lista de stands.';
+    note.textContent = 'Cámara no disponible (se necesita HTTPS). Usá la lista de stands.';
     return;
   }
-  const scanner = new Html5QrcodeScanner('reader', { fps: 10, qrbox: { width: 220, height: 220 } });
-  scanner.render(
-    (text) => {
-      scanner.clear();
-      const m = text.match(/\/scan\?tok=([^&)\s]+)/) || text.match(/tok=([^&)\s]+)/);
-      visitStand(m ? m[1] : text);
-    },
-    () => {}
-  );
+
+  // Html5Qrcode (no Html5QrcodeScanner): sin selector de cámara ni botón "Start".
+  const scanner = new Html5Qrcode('reader', { verbose: false });
+  const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+  let done = false;
+  const onScan = async (text) => {
+    if (done) return;
+    done = true;
+    const m = text.match(/\/scan\?tok=([^&)\s]+)/) || text.match(/tok=([^&)\s]+)/);
+    const tok = m ? m[1] : text;
+    try { await scanner.stop(); } catch {}
+    visitStand(tok);
+  };
+
+  // Arranque automático en la cámara trasera. Si el equipo no acepta facingMode,
+  // se busca una trasera/environment por nombre; si no, la primera disponible.
+  scanner.start({ facingMode: 'environment' }, config, onScan, () => {}).catch(async () => {
+    try {
+      const cams = await Html5Qrcode.getCameras();
+      if (!cams.length) throw new Error('sin cámaras');
+      const rear = cams.find((c) => /back|rear|environment|trasera|posterior/i.test(c.label)) || cams[0];
+      await scanner.start(rear.id, config, onScan, () => {});
+    } catch {
+      note.textContent = 'No pudimos abrir la cámara. Permití el acceso a la cámara del navegador o usá la lista de stands.';
+    }
+  });
 }
 
 // Base pública de la app (funciona en raíz o en subruta; nunca hardcodea el dominio).

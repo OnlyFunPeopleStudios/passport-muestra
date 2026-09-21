@@ -14,7 +14,7 @@
       <h1>Centro de Mando</h1>
       <p class="muted small" id="login-event">Pasaporte Digital · panel del evento</p>
       <label for="login-pass">Contraseña</label>
-      <input type="password" id="login-pass" autocomplete="current-password">
+      <div style="display:flex;gap:8px;align-items:center"><input type="password" id="login-pass" autocomplete="current-password" style="flex:1"><button type="button" class="btn small ghost" onclick="togglePass('login-pass', this)">Ver</button></div>
       <button class="btn primary" type="submit">Ingresar</button>
       <p id="login-err" class="err hidden"></p>
     </form>

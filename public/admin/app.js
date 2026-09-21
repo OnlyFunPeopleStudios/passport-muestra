@@ -36,6 +36,15 @@ function showLogin() {
   $sidebar.classList.add('hidden');
   $main.classList.add('hidden');
 }
+
+// Muestra/oculta el contenido de un campo de contraseña (botón "Ver"/"Ocultar").
+function togglePass(id, btn) {
+  const inp = document.getElementById(id);
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Ocultar' : 'Ver';
+  inp.focus();
+}
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = document.getElementById('login-err');
@@ -676,9 +685,9 @@ async function renderConfig() {
       <h3>Seguridad</h3>
       <p class="muted small">Cambiá la contraseña del Centro de Mando (por ejemplo, antes de entregarle el panel a otra persona). Se guarda cifrada: nunca en texto plano.</p>
       <form id="pw-form" class="form-grid" style="max-width:440px">
-        <div><label>Contraseña actual</label><input type="password" name="current" autocomplete="current-password"></div>
-        <div><label>Nueva contraseña (mínimo 8 caracteres)</label><input type="password" name="next" minlength="8" autocomplete="new-password"></div>
-        <div><label>Repetir nueva contraseña</label><input type="password" name="confirm" minlength="8" autocomplete="new-password"></div>
+        <div><label>Contraseña actual</label><div style="display:flex;gap:8px;align-items:center"><input type="password" id="pass-current" name="current" autocomplete="current-password" style="flex:1"><button type="button" class="btn small ghost" onclick="togglePass('pass-current', this)">Ver</button></div></div>
+        <div><label>Nueva contraseña (mínimo 8 caracteres)</label><div style="display:flex;gap:8px;align-items:center"><input type="password" id="pass-next" name="next" minlength="8" autocomplete="new-password" style="flex:1"><button type="button" class="btn small ghost" onclick="togglePass('pass-next', this)">Ver</button></div></div>
+        <div><label>Repetir nueva contraseña</label><div style="display:flex;gap:8px;align-items:center"><input type="password" id="pass-confirm" name="confirm" minlength="8" autocomplete="new-password" style="flex:1"><button type="button" class="btn small ghost" onclick="togglePass('pass-confirm', this)">Ver</button></div></div>
         <div><button class="btn primary" type="submit">Cambiar contraseña</button></div>
       </form>
       <p class="note">Al cambiarla se cierran las sesiones abiertas, incluida esta. Si olvidás la contraseña, se recupera con la clave de emergencia <code>ADMIN_PASSWORD</code> del servidor (no se muestra acá).</p>

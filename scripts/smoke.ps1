@@ -451,6 +451,13 @@ Check '59. summary.csv -> 200, BOM y columna publicado (si/no)' ($respB.StatusCo
 Check '60. summary.csv -> nombre de stand tipo fórmula neutralizado' ($rawB.Contains("'=EVIL()"))
 if ($evilStand.ok) { Invoke-Api DELETE "/api/admin/stands/$($evilStand.data.stand.id)" | Out-Null }
 
+# 61. Guard estatico: el tope de PBKDF2 no puede pasar lo que admite WebCrypto en
+# Cloudflare Workers (100000). En Cloudflare, >100000 lanza NotSupportedError -> 500
+# y rompe login y cambio de contraseña (workerd local no lo detecta).
+$workerSrc = Get-Content (Join-Path $PSScriptRoot '..\src\worker.js') -Raw
+$iterMatch = [regex]::Match($workerSrc, 'PBKDF2_ITERATIONS\s*=\s*(\d+)')
+Check '61. PBKDF2_ITERATIONS <= 100000 (tope de Cloudflare Workers)' ($iterMatch.Success -and [int]$iterMatch.Groups[1].Value -le 100000)
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

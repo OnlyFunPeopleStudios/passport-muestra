@@ -112,7 +112,11 @@ async function getConfig(db) {
 
 const COOKIE = 'admin_session';
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-const PBKDF2_ITERATIONS = 210000;
+// WebCrypto de Cloudflare Workers rechaza PBKDF2 por encima de 100000 iteraciones
+// (NotSupportedError). 100000 es el máximo permitido y el que se guarda por fila.
+// ponytail: tope impuesto por la plataforma; si Cloudflare lo sube, revisar acá.
+const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_MAX = 100000;
 
 const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -123,9 +127,12 @@ function cookieValue(req, name) {
 }
 
 async function pbkdf2(password, saltB64, iterations) {
+  // Clamp defensivo: filas viejas con iterations fuera del tope de Workers no deben
+  // tirar 500 (devolverán hash distinto → la verificación falla, no rompe el login).
+  const iter = Math.min(Number(iterations) || PBKDF2_ITERATIONS, PBKDF2_MAX);
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations: iter },
     key,
     256
   );

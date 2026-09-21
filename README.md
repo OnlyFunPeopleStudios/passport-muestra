@@ -89,7 +89,7 @@ Todo lo guardado se refleja **al instante** en la app pública (colores, textos,
 
 ## Administración
 
-El Centro de Mando (`/admin`) está protegido por contraseña. Se guarda **cifrada** en la base (PBKDF2-SHA256, salt aleatorio, 210 000 iteraciones): nunca en texto plano. La sesión viaja en una cookie **HttpOnly + SameSite=Lax** (y `Secure` en HTTPS) y se invalida al cerrar sesión o al cambiar la contraseña. El visitante nunca ve un login: solo se protege `/api/admin/*`.
+El Centro de Mando (`/admin`) está protegido por contraseña. Se guarda **cifrada** en la base (PBKDF2-SHA256, salt aleatorio, 100 000 iteraciones — el máximo que admite WebCrypto en Cloudflare Workers): nunca en texto plano. La sesión viaja en una cookie **HttpOnly + SameSite=Lax** (y `Secure` en HTTPS) y se invalida al cerrar sesión o al cambiar la contraseña. El visitante nunca ve un login: solo se protege `/api/admin/*`.
 
 ### Primer ingreso y contraseña de emergencia
 

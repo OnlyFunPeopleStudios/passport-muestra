@@ -13,7 +13,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | **V0.3** | ✅ Centro de Mando: configuración del evento (identidad, paleta, presets, logo, sellos, textos), CRUD de stands, estadísticas, moderación de comentarios, visitantes, export CSV |
 | **V0.3.1** | ✅ Autenticación del Centro de Mando con contraseña (PBKDF2 + sesión HttpOnly), cambio de contraseña y dashboard estabilizado |
 | V0.4 | ⏳ Exportación CSV/XLSX + banderas SVG |
-| V0.5 | ⏳ Seguridad, pruebas y deploy en Cloudflare |
+| V0.5 | 🟡 Deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar`; pruebas reales pendientes |
 
 ## Stack
 
@@ -165,7 +165,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 
 ## Deployment en Cloudflare
 
-> La D1 `passport-db` ya está creada y su `database_id` está cargado en `wrangler.jsonc`. Los pasos 1-2 solo hacen falta si se rehace desde cero.
+> **Estado: desplegado y operativo.** El Worker `passport-muestra` sirve en **https://pasaporte.onlyfunpeople.com.ar** (custom domain declarado en `wrangler.jsonc` → `routes` con `custom_domain: true`). La D1 `passport-db` ya está creada y su `database_id` está cargado. Los pasos 1-2 solo hacen falta si se rehace desde cero.
 
 1. `npx wrangler login`
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
@@ -177,7 +177,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
 5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
 6. `npx wrangler deploy`
-7. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
+7. Dominio: ya declarado en `wrangler.jsonc` (`routes` → `custom_domain`), `wrangler deploy` lo provisiona solo. Con el custom domain activo, `*.workers.dev` queda deshabilitado (para habilitarlo: `"workers_dev": true`).
 
 ## Assets y licencias
 
@@ -194,4 +194,4 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.3** ✅ Centro de Mando: evento personalizable (motor único), presets de paleta, logo, sellos, textos, CRUD de stands, moderación de comentarios, visitantes, export CSV.
 - **V0.3.1** ✅ dashboard estabilizado (contrato de arrays + contadores en 0) y login del Centro de Mando con contraseña cifrada, sesión HttpOnly y cambio de contraseña.
 - **V0.4** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
-- **V0.5** ⏳ pruebas reales, seguridad y deploy en Cloudflare con `pasaporte.onlyfunpeople.com.ar`.
+- **V0.5** 🟡 deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar` (custom domain + HTTPS); pruebas reales en la feria pendientes.

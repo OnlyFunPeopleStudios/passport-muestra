@@ -159,6 +159,9 @@ function standFormHtml() {
             <div><label>Imagen del sello (para tipo image, máx 200 KB)</label>
               <input type="file" name="stamp_image_file" id="sf-file" accept="image/png,image/svg+xml,image/webp,image/jpeg">
               <span class="muted small">Se convertirá a data URL</span></div>
+            <div><label>Palabra secreta</label>
+              <input name="secret_word" id="sf-word" maxlength="40" placeholder="Ej: MARRUECOS" autocomplete="off">
+              <span class="muted small">Se muestra físicamente en el stand. Permite registrar la visita sin escanear el QR. Dejala vacía para desactivar esta vía.</span></div>
             <div><label>Orden</label><input name="sort_order" type="number" value="0"></div>
             <div><label><input name="is_published" type="checkbox" checked> Activo en la muestra</label></div>
           </div>
@@ -327,6 +330,7 @@ async function renderStands() {
             name: stand.name, course: stand.course ?? '', area: stand.area ?? '',
             description: stand.description ?? '', flag: stand.flag ?? '',
             stamp_icon: stand.stamp_icon ?? '', stamp_color: stand.stamp_color || '#0f4c81', stamp_type: stand.stamp_type || 'flag', sort_order: stand.sort_order ?? 0,
+            secret_word: stand.secret_word ?? '',
           }).forEach(([k, v]) => (form[k] ? (form[k].value = v) : null));
           form.is_published.checked = !!stand.is_published;
           updatePreview();

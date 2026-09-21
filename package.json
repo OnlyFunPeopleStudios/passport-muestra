@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "test": "node scripts/offline.test.mjs && pwsh -NoProfile -File scripts/smoke.ps1",
-    "db:init": "wrangler d1 execute passport-db --local --file=migrations/0001_init.sql && wrangler d1 execute passport-db --local --file=migrations/0002_admin_config.sql && wrangler d1 execute passport-db --local --file=migrations/0003_admin_auth.sql && wrangler d1 execute passport-db --local --file=migrations/0004_stamps.sql",
+    "db:init": "wrangler d1 execute passport-db --local --file=migrations/0001_init.sql && wrangler d1 execute passport-db --local --file=migrations/0002_admin_config.sql && wrangler d1 execute passport-db --local --file=migrations/0003_admin_auth.sql && wrangler d1 execute passport-db --local --file=migrations/0004_stamps.sql && wrangler d1 execute passport-db --local --file=migrations/0005_secret_word.sql",
     "db:seed": "wrangler d1 execute passport-db --local --file=seed/seed.sql",
     "db:demo": "wrangler d1 execute passport-db --local --file=seed/seed-data.sql"
   },

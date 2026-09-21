@@ -32,6 +32,16 @@
     return 'transient';
   }
 
+  // V0.7 - Palabra secreta del stand: misma normalización que el servidor
+  // (trim + minúsculas), para que la validación offline coincida con la online.
+  const normalizeWord = (w) => String(w ?? '').trim().toLowerCase();
+
+  const matchStandByWord = (stands, word) => {
+    const w = normalizeWord(word);
+    if (!w) return null;
+    return (stands || []).find((s) => s.secret_word && normalizeWord(s.secret_word) === w) || null;
+  };
+
   // Une las visitas del servidor con las locales sin duplicar por stand.
   // Gana la local cuando existe: puede tener rating/comentario recién cargados
   // que todavía no llegaron al servidor.
@@ -103,6 +113,7 @@
 
   const getStands = () => safe(getAll(STANDS), []);
   const findStandByToken = (tok) => getStands().then((all) => all.find((s) => s.token === tok) || null);
+  const findStandByWord = (word) => getStands().then((all) => matchStandByWord(all, word));
 
   // ---------- visitas (espejo local del pasaporte de este teléfono) ----------
 
@@ -146,10 +157,12 @@
     return record;
   }
 
-  const bodyFor = (op) =>
-    op.type === 'visit'
-      ? { vt: op.visitor_id, tok: op.token }
-      : { vt: op.visitor_id, tok: op.token, rating: op.rating, comment: op.comment ?? '' };
+  // Una visita por palabra reenvía la palabra: el servidor la vuelve a validar
+  // (y con 409 confirma que ya estaba registrada, sin duplicar).
+  const bodyFor = (op) => {
+    if (op.type !== 'visit') return { vt: op.visitor_id, tok: op.token, rating: op.rating, comment: op.comment ?? '' };
+    return op.word ? { vt: op.visitor_id, word: op.word } : { vt: op.visitor_id, tok: op.token };
+  };
 
   // Vacía la cola. Un fallo de red o un 5xx corta el bucle (se reintenta después);
   // un 4xx se guarda como error permanente (no se borra: queda para diagnóstico).
@@ -185,9 +198,7 @@
 
   // ---------- operaciones offline usadas por app.js ----------
 
-  async function visitOffline(vt, tok) {
-    const stand = await findStandByToken(tok);
-    if (!stand) throw new Error('Sin conexión y este stand todavía no está en el dispositivo. Reconectate y probá de nuevo.');
+  async function registerOffline(vt, stand, visitMethod, op) {
     const existing = await getVisit(vt, stand.id);
     if (existing) return { already: true, visit: existing };
     const visit = {
@@ -202,10 +213,24 @@
       rating: null,
       comment: null,
       created_at: new Date().toISOString(),
+      visit_method: visitMethod,
     };
     await saveVisit(vt, visit);
-    await enqueue({ type: 'visit', visitor_id: vt, token: tok, stand_id: stand.id });
+    await enqueue({ type: 'visit', visitor_id: vt, stand_id: stand.id, ...op });
     return { already: false, visit, passport: await localPassport(vt) };
+  }
+
+  async function visitOffline(vt, tok) {
+    const stand = await findStandByToken(tok);
+    if (!stand) throw new Error('Sin conexión y este stand todavía no está en el dispositivo. Reconectate y probá de nuevo.');
+    return registerOffline(vt, stand, 'qr', { token: tok });
+  }
+
+  // Visita sin conexión con la palabra del stand. El servidor la revalidará al sincronizar.
+  async function visitByWordOffline(vt, word) {
+    const stand = await findStandByWord(word);
+    if (!stand) throw new Error('La palabra no corresponde a ningún stand.');
+    return registerOffline(vt, stand, 'secret', { word: String(word ?? '') });
   }
 
   async function evaluateOffline(vt, tok, rating, comment) {
@@ -270,6 +295,9 @@
     saveStands,
     getStands,
     findStandByToken,
+    findStandByWord,
+    normalizeWord,
+    matchStandByWord,
     saveVisit,
     getVisit,
     getVisits,
@@ -278,8 +306,9 @@
     enqueue,
     pendingCount,
     visitOffline,
+    visitByWordOffline,
     evaluateOffline,
     mergeVisits,
-    _pure: { visitKey, classifySyncResult, mergeVisits },
+    _pure: { visitKey, classifySyncResult, mergeVisits, normalizeWord, matchStandByWord, bodyFor },
   };
 })(typeof window !== 'undefined' ? window : this);

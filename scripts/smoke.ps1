@@ -483,6 +483,133 @@ Check '68. offline.js guarda en IndexedDB y encola con operation_id' ($offSrc -m
 Check '69. offline.js sincroniza reutilizando /api/visits y /api/evaluate' ($offSrc -match "'/api/visits'" -and $offSrc -match "'/api/evaluate'")
 Check '70. offline.js no toca endpoints admin' ($offSrc -notmatch '/api/admin')
 
+# ---------- V0.7: palabra secreta del stand ----------
+Write-Host ""
+Write-Host "== V0.7 (palabra secreta del stand) ==" -ForegroundColor Cyan
+
+# 71. Dos stands con palabra propia y uno sin palabra
+$wA = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Palabra A'; flag = 'ar'; secret_word = 'GIRASOL' }
+$wB = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Palabra B'; flag = 'br'; secret_word = 'TIBURON' }
+$wC = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Sin Palabra'; flag = 'co' }
+$wAId = $wA.data.stand.id; $wBId = $wB.data.stand.id; $wCId = $wC.data.stand.id
+Check '71. crear stands con y sin palabra secreta -> 201' ($wA.ok -and $wB.ok -and $wC.ok -and $wAId -ne $wBId)
+
+# 72. Palabra correcta -> registra la visita con método 'secret'
+$visP = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Palabra' } -Cookie ''
+$vpTok = $visP.data.visitor.token
+$okW = Invoke-Api POST '/api/visits' @{ vt = $vpTok; word = 'GIRASOL' } -Cookie ''
+Check '72. palabra correcta -> 201 con visit_method secret' ($okW.ok -and $okW.status -eq 201 -and $okW.data.visit.visit_method -eq 'secret' -and $okW.data.visit.stand_id -eq $wAId)
+
+# 73. Palabra incorrecta -> 404 y no registra visita (sigue con la única de 72)
+$badW = Invoke-Api POST '/api/visits' @{ vt = $vpTok; word = 'NO-EXISTE-ESTA-PALABRA' } -Cookie ''
+$pBadW = Invoke-Api GET "/api/passport?vt=$vpTok" $null -Cookie ''
+Check '73. palabra incorrecta -> 404 y sin visita' (-not $badW.ok -and $badW.status -eq 404 -and $badW.data.error -match 'La palabra no corresponde a ning' -and @($pBadW.data.visits).Count -eq 1)
+
+# 74. Tolerancia a mayúsculas y espacios sobrantes
+$visP2 = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Espacios' } -Cookie ''
+$vp2Tok = $visP2.data.visitor.token
+$spaceW = Invoke-Api POST '/api/visits' @{ vt = $vp2Tok; word = '   girasol   ' } -Cookie ''
+Check '74. tolera mayúsculas y espacios ("   girasol   ") -> 201' ($spaceW.ok -and $spaceW.data.visit.stand_id -eq $wAId)
+
+# 75. Un stand sin palabra no se puede registrar por esa vía
+$noWord = Invoke-Api POST '/api/visits' @{ vt = $vp2Tok; word = 'Stand Sin Palabra' } -Cookie ''
+Check '75. stand sin palabra -> 404' (-not $noWord.ok -and $noWord.status -eq 404)
+
+# 76. Repetir la palabra -> 409 (una visita por stand)
+$againW = Invoke-Api POST '/api/visits' @{ vt = $vp2Tok; word = 'GIRASOL' } -Cookie ''
+$pAgain = Invoke-Api GET "/api/passport?vt=$vp2Tok" $null -Cookie ''
+Check '76. repetir la palabra -> 409 sin duplicar' (-not $againW.ok -and $againW.status -eq 409 -and $againW.data.already -and @($pAgain.data.visits).Count -eq 1)
+
+# 77. QR + palabra = una sola visita, conservando el primer método (qr)
+$visMix = Invoke-Api POST '/api/visitors' @{ name = 'Visitante QR+Palabra' } -Cookie ''
+$mixTok = $visMix.data.visitor.token
+$mQr = Invoke-Api POST '/api/visits' @{ vt = $mixTok; tok = $wA.data.stand.token } -Cookie ''
+$mWord = Invoke-Api POST '/api/visits' @{ vt = $mixTok; word = 'GIRASOL' } -Cookie ''
+$pMix = Invoke-Api GET "/api/passport?vt=$mixTok" $null -Cookie ''
+$mixA = @($pMix.data.visits | Where-Object { $_.stand_id -eq $wAId })
+Check '77. QR + palabra -> 1 visita y conserva qr' ($mQr.ok -and -not $mWord.ok -and $mWord.status -eq 409 -and $mixA.Count -eq 1 -and $mixA[0].visit_method -eq 'qr')
+
+# 78. Palabra + QR = una sola visita, conservando 'secret'
+$visMix2 = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Palabra+QR' } -Cookie ''
+$mix2Tok = $visMix2.data.visitor.token
+$m2Word = Invoke-Api POST '/api/visits' @{ vt = $mix2Tok; word = 'TIBURON' } -Cookie ''
+$m2Qr = Invoke-Api POST '/api/visits' @{ vt = $mix2Tok; tok = $wB.data.stand.token } -Cookie ''
+$pMix2 = Invoke-Api GET "/api/passport?vt=$mix2Tok" $null -Cookie ''
+$mixB = @($pMix2.data.visits | Where-Object { $_.stand_id -eq $wBId })
+Check '78. palabra + QR -> 1 visita y conserva secret' ($m2Word.ok -and -not $m2Qr.ok -and $m2Qr.status -eq 409 -and $mixB.Count -eq 1 -and $mixB[0].visit_method -eq 'secret')
+
+# 79. La evaluación funciona igual sobre una visita por palabra
+$evW = Invoke-Api POST '/api/evaluate' @{ vt = $mix2Tok; tok = $wB.data.stand.token; rating = 5; comment = 'Llegué con la palabra' } -Cookie ''
+$pEvW = Invoke-Api GET "/api/passport?vt=$mix2Tok" $null -Cookie ''
+$evWVisit = @($pEvW.data.visits | Where-Object { $_.stand_id -eq $wBId })
+Check '79. evaluar una visita por palabra -> rating persistido' ($evW.ok -and $evWVisit.Count -eq 1 -and $evWVisit[0].rating -eq 5 -and $evWVisit[0].visit_method -eq 'secret')
+
+# 80. Dos stands con palabras distintas -> visitas independientes
+$visTwo = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Dos Palabras' } -Cookie ''
+$twoTok = $visTwo.data.visitor.token
+$t1 = Invoke-Api POST '/api/visits' @{ vt = $twoTok; word = 'GIRASOL' } -Cookie ''
+$t2 = Invoke-Api POST '/api/visits' @{ vt = $twoTok; word = 'TIBURON' } -Cookie ''
+$pTwo = Invoke-Api GET "/api/passport?vt=$twoTok" $null -Cookie ''
+Check '80. dos stands con palabras distintas -> 2 visitas' ($t1.ok -and $t2.ok -and @($pTwo.data.visits).Count -eq 2)
+
+# 81-82. Marruecos: dos stands, cada uno con su palabra (no la comparten)
+$pubStandsW = (Invoke-Api GET '/api/stands' $null -Cookie '').data.stands
+$maV = $pubStandsW | Where-Object { $_.slug -eq 'marruecos-videos' } | Select-Object -First 1
+$maF = $pubStandsW | Where-Object { $_.slug -eq 'marruecos-fotografia' } | Select-Object -First 1
+Check '81. Marruecos: dos palabras secretas distintas y no vacías' ($null -ne $maV -and $null -ne $maF -and $maV.secret_word -and $maF.secret_word -and $maV.secret_word -ne $maF.secret_word)
+$visMaW = Invoke-Api POST '/api/visitors' @{ name = 'Visitante Marruecos Palabra' } -Cookie ''
+$maWT = $visMaW.data.visitor.token
+$mw1 = Invoke-Api POST '/api/visits' @{ vt = $maWT; word = $maV.secret_word } -Cookie ''
+$mw2 = Invoke-Api POST '/api/visits' @{ vt = $maWT; word = $maF.secret_word } -Cookie ''
+Check '82. Marruecos: visita independiente por palabra a cada stand' ($mw1.ok -and $mw2.ok -and $mw1.data.visit.stand_id -ne $mw2.data.visit.stand_id)
+
+# 83. Una palabra no puede identificar a dos stands
+$dupWord = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Palabra Repetida'; flag = 'eg'; secret_word = 'tiburon' }
+Check '83. palabra ya usada por otro stand -> 400' (-not $dupWord.ok -and $dupWord.status -eq 400)
+
+# 84. Editar la palabra la activa; vaciarla desactiva la vía
+$setWord = Invoke-Api PUT "/api/admin/stands/$wCId" @{ secret_word = 'CEBRA' }
+$newWord = Invoke-Api POST '/api/visits' @{ vt = $vpTok; word = 'cebra' } -Cookie ''
+$clearWord = Invoke-Api PUT "/api/admin/stands/$wCId" @{ secret_word = '' }
+$goneWord = Invoke-Api POST '/api/visits' @{ vt = $vp2Tok; word = 'CEBRA' } -Cookie ''
+Check '84. editar palabra (activa) y vaciarla (desactiva) -> 201 / 404' ($setWord.ok -and $newWord.ok -and $clearWord.ok -and -not $goneWord.ok -and $goneWord.status -eq 404)
+
+# 85. Activar/desactivar un stand no borra su palabra (actualización parcial)
+Invoke-Api PUT "/api/admin/stands/$wAId" @{ name = $wA.data.stand.name; is_published = $true } | Out-Null
+$admStandsW = (Invoke-Api GET '/api/admin/stands').data.stands
+$wARow = @($admStandsW | Where-Object { $_.id -eq $wAId })
+Check '85. el editor recibe secret_word y activar no lo borra' ($wARow.Count -eq 1 -and $wARow[0].secret_word -eq 'GIRASOL')
+
+# 86. La lista de visitantes del panel no expone la palabra
+$visRawW = Get-Raw '/api/admin/visitors'
+Check '86. /api/admin/visitors no expone secret_word' ($visRawW.ok -and -not ($visRawW.raw -match 'secret_word'))
+
+# 87. visitas.csv agrega la columna metodo sin quitar las anteriores
+$csvW = Get-Raw '/api/admin/export/visitas.csv'
+Check '87. visitas.csv -> columna metodo con QR/Palabra' ($csvW.ok -and $csvW.raw -match 'comentario,metodo' -and $csvW.raw -match ',Palabra' -and $csvW.raw -match ',QR')
+
+# 88. Regresión: una visita por QR se sigue guardando como 'qr'
+$visQr = Invoke-Api POST '/api/visitors' @{ name = 'Visitante QR' } -Cookie ''
+$qrTok = $visQr.data.visitor.token
+$qrVis = Invoke-Api POST '/api/visits' @{ vt = $qrTok; tok = $wC.data.stand.token } -Cookie ''
+Check '88. visita por QR -> visit_method qr (compatibilidad)' ($qrVis.ok -and $qrVis.data.visit.visit_method -eq 'qr')
+
+# 89. Migración 0005: solo agrega columnas (no destructiva)
+$migPath = Join-Path $PSScriptRoot '..\migrations\0005_secret_word.sql'
+$migSrc = if (Test-Path $migPath) { Get-Content $migPath -Raw } else { '' }
+Check '89. migración 0005 agrega secret_word y visit_method (sin DROP/DELETE)' ($migSrc -match 'ALTER TABLE stands ADD COLUMN secret_word' -and $migSrc -match 'ALTER TABLE visits ADD COLUMN visit_method' -and -not ($migSrc -match '(?i)\b(drop|delete)\b'))
+
+# 90. UI: campo en el Centro de Mando + opción "palabra del stand" en la app
+$admSrcW = Get-Content (Join-Path $pub 'admin\app.js') -Raw
+Check '90. UI con campo Palabra secreta y ruta /word offline-capaz' ($admSrcW -match 'name="secret_word"' -and $admSrcW -match 'Permite registrar la visita sin escanear el QR' -and $appSrc -match "'/word':\s*renderWord" -and $offSrc -match 'visitByWordOffline' -and $offSrc -match 'matchStandByWord')
+
+# Cleanup: despublicar los stands creados en esta sección (misma corrida idempotente)
+foreach ($st in @($wA, $wB, $wC)) {
+  if ($st.ok) {
+    Invoke-Api PUT "/api/admin/stands/$($st.data.stand.id)" @{ name = $st.data.stand.name; is_published = $false } | Out-Null
+  }
+}
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

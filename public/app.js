@@ -96,7 +96,7 @@ function route() {
   const hash = (location.hash || '#/').replace(/^#/, '');
   const [path, query] = hash.split('?');
   const params = new URLSearchParams(query || '');
-  const go = { '/': renderHome, '/home': renderHome, '/passport': renderPassport, '/stands': renderStands, '/scan': renderScan, '/qr': renderQR }[path];
+  const go = { '/': renderHome, '/home': renderHome, '/passport': renderPassport, '/stands': renderStands, '/scan': renderScan, '/word': renderWord, '/qr': renderQR }[path];
   if (path.startsWith('/scan') && params.get('tok')) visitStand(params.get('tok'));
   else (go || renderHome)();
 }
@@ -121,7 +121,7 @@ function renderHome() {
       <h3>¿Cómo funciona?</h3>
       <ol class="steps">
         <li>Creá tu pasaporte (una sola vez).</li>
-        <li>En cada stand escaneá su QR.</li>
+        <li>En cada stand escaneá su QR (o escribí la palabra que figura en el stand).</li>
         <li>La bandera del país queda sellada en tu pasaporte.</li>
         <li>Puntúa el proyecto con estrellas ⭐ y dejá un comentario si querés.</li>
       </ol>
@@ -184,6 +184,9 @@ async function renderPassport() {
       </section>
       <div class="row mt">
         <button class="btn primary" onclick="location.hash='#/scan'">📷 Escanear stand</button>
+        <button class="btn ghost" onclick="location.hash='#/word'">🔑 Tengo la palabra del stand</button>
+      </div>
+      <div class="row mt">
         <button class="btn ghost" onclick="location.hash='#/stands'">Ver lista de stands</button>
       </div>`;
   } catch (err) {
@@ -246,6 +249,55 @@ async function visitStand(tok) {
       else showVisitSuccess({ visit: res.visit, visits: res.passport.visits, total_stands: res.passport.total_stands });
     } catch (offErr) {
       $view.innerHTML = `<section class="card center"><h2>No se pudo visitar</h2><p>${esc(offErr.message)}</p><button class="btn mt" onclick="location.hash='#/stands'">Volver a los stands</button></section>`;
+    }
+  }
+}
+
+// Vía alternativa al QR: la palabra que está escrita en el stand.
+function renderWord(error = '', value = '') {
+  if (!localStorage.getItem(VT_KEY)) { location.hash = '/home'; return; }
+  $view.innerHTML = `
+    <section class="card">
+      <h2>Palabra del stand</h2>
+      <p class="muted">Escribí la palabra que aparece en el stand para sellar tu pasaporte sin escanear el QR.</p>
+      <form id="word-form" class="mt">
+        <label for="word">Palabra del stand</label>
+        <input id="word" name="word" maxlength="40" autocomplete="off" autocapitalize="characters" placeholder="Ej: MARRUECOS" value="${esc(value)}">
+        <button class="btn primary" type="submit">Registrar visita</button>
+        ${error ? `<p class="muted small" id="word-error">${esc(error)}</p>` : ''}
+      </form>
+      <div class="row mt">
+        <button class="btn ghost" onclick="location.hash='#/scan'">📷 Escanear stand</button>
+        <button class="btn ghost" onclick="location.hash='#/stands'">Ver lista de stands</button>
+      </div>
+    </section>`;
+  const form = document.getElementById('word-form');
+  form.addEventListener('submit', (e) => { e.preventDefault(); visitByWord(form.word.value); });
+  document.getElementById('word').focus();
+}
+
+async function visitByWord(word) {
+  const vt = localStorage.getItem(VT_KEY);
+  if (!vt) { location.hash = '/home'; return; }
+  // Se resuelve con el catálogo del dispositivo: sirve online y offline, y deja
+  // el token del stand a mano para la evaluación posterior.
+  const stand = offline.matchStandByWord(await apiStands(), word);
+  if (!stand) { renderWord('La palabra no corresponde a ningún stand.', word); return; }
+  lastTok = stand.token;
+  $view.innerHTML = `<section class="card center"><p class="muted">Registrando visita…</p></section>`;
+  try {
+    const data = await api('/api/visits', { method: 'POST', body: JSON.stringify({ vt, word }) });
+    await mirrorPassport(vt, data);
+    showVisitSuccess(data);
+  } catch (err) {
+    if (err.data?.already && err.data.visit) { showAlreadyVisited(err.data.visit); return; }
+    if (err.status) { renderWord(err.message, word); return; }
+    try {
+      const res = await offline.visitByWordOffline(vt, word);
+      if (res.already) showAlreadyVisited(res.visit);
+      else showVisitSuccess({ visit: res.visit, visits: res.passport.visits, total_stands: res.passport.total_stands });
+    } catch (offErr) {
+      renderWord(offErr.message, word);
     }
   }
 }
@@ -385,6 +437,7 @@ function renderScan() {
       <p class="muted">${esc(t('scan_note', 'Apuntá la cámara al QR del stand.'))}</p>
       <div id="reader"></div>
       <p id="scan-note" class="muted small">Escaneando…</p>
+      <button class="btn ghost mt" onclick="location.hash='#/word'">🔑 Tengo la palabra del stand</button>
       <button class="btn ghost mt" onclick="location.hash='#/stands'">No tengo cámara · ver lista</button>
     </section>`;
 

@@ -24,6 +24,21 @@ function sanitizeComment(raw) {
   return trimmed.replace(BAD_WORDS, '***');
 }
 
+// V0.7 - Palabra secreta del stand: vía alternativa al QR.
+// Comparación tolerante a mayúsculas y espacios sobrantes (sin transformaciones raras).
+const SECRET_WORD_MAX = 40;
+const normalizeWord = (w) => String(w ?? '').trim().toLowerCase();
+
+// Devuelve el stand publicado que ya usa esa palabra (excluyendo excludeId), o null.
+// Solo los stands publicados reciben visitas por palabra, así que un draft no bloquea.
+async function wordOwner(db, word, excludeId) {
+  if (!word) return null;
+  const { results } = await db
+    .prepare("SELECT id, name, secret_word FROM stands WHERE is_published = 1 AND secret_word IS NOT NULL AND secret_word != ''")
+    .all();
+  return results.find((s) => s.id !== excludeId && normalizeWord(s.secret_word) === normalizeWord(word)) ?? null;
+}
+
 // ---------- Configuración del evento ----------
 
 const STAMP_STYLES = ['circular', 'redondo', 'estampilla', 'cuadrado'];
@@ -223,7 +238,7 @@ async function passport(db, visitorToken) {
   if (!visitor) return { status: 404, error: 'pasaporte no encontrado' };
   const { results: visits } = await db
     .prepare(
-      `SELECT v.stand_id, v.rating, v.comment, v.created_at,
+      `SELECT v.stand_id, v.rating, v.comment, v.created_at, v.visit_method,
               s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image
        FROM visits v JOIN stands s ON s.id = v.stand_id
        WHERE v.visitor_id = ? ORDER BY v.id`
@@ -246,6 +261,7 @@ async function standStats(db) {
       .prepare(
         `SELECT s.id, s.slug, s.name, s.course, s.description, s.area, s.flag, s.token,
                 s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image, s.sort_order, s.is_published,
+                s.secret_word,
                 COALESCE(v.visits, 0) visits, COALESCE(v.evals, 0) evals,
                 v.avg_rating, COALESCE(v.comments, 0) comments
          FROM stands s
@@ -286,9 +302,11 @@ export default {
     }
 
     if (method === 'GET' && path === '/api/stands') {
+      // secret_word viaja en el catálogo porque la validación debe funcionar sin conexión.
+      // No es un secreto real: la palabra está impresa en el stand y no es autenticación.
       const { results } = await db
         .prepare(
-          `SELECT id, slug, name, course, description, area, flag, token, stamp_icon, stamp_color, stamp_type, stamp_image
+          `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image
            FROM stands WHERE is_published = 1 ORDER BY sort_order, id`
         )
         .all();
@@ -311,15 +329,28 @@ export default {
         .bind(String(body.vt ?? ''))
         .first();
       if (!visitor) return json({ error: 'pasaporte no encontrado' }, 404);
-      const stand = await db
-        .prepare('SELECT id, name, flag, token, stamp_type, stamp_image FROM stands WHERE token = ? AND is_published = 1')
-        .bind(String(body.tok ?? ''))
-        .first();
-      if (!stand) return json({ error: 'stand no encontrado' }, 404);
+      // Dos vías para identificar el stand: token del QR o palabra secreta del stand.
+      let stand = null;
+      let visitMethod = 'qr';
+      if (body.word !== undefined && body.word !== null) {
+        const word = normalizeWord(body.word);
+        const { results } = await db
+          .prepare('SELECT id, name, flag, token, stamp_type, stamp_image, secret_word FROM stands WHERE is_published = 1')
+          .all();
+        stand = word ? results.find((s) => s.secret_word && normalizeWord(s.secret_word) === word) ?? null : null;
+        if (!stand) return json({ error: 'La palabra no corresponde a ningún stand.' }, 404);
+        visitMethod = 'secret';
+      } else {
+        stand = await db
+          .prepare('SELECT id, name, flag, token, stamp_type, stamp_image FROM stands WHERE token = ? AND is_published = 1')
+          .bind(String(body.tok ?? ''))
+          .first();
+        if (!stand) return json({ error: 'stand no encontrado' }, 404);
+      }
       try {
         await db
-          .prepare('INSERT INTO visits (visitor_id, stand_id) VALUES (?, ?)')
-          .bind(visitor.id, stand.id)
+          .prepare('INSERT INTO visits (visitor_id, stand_id, visit_method) VALUES (?, ?, ?)')
+          .bind(visitor.id, stand.id, visitMethod)
           .run();
       } catch (err) {
         if (/UNIQUE constraint/i.test(err.message)) {
@@ -337,7 +368,7 @@ const existing = await db
         return json({ error: 'no se pudo registrar la visita' }, 500);
       }
       const data = await passport(db, visitor.token);
-      data.visit = { stand_id: stand.id, stand_name: stand.name, flag: stand.flag, stamp_type: stand.stamp_type, stamp_image: stand.stamp_image };
+      data.visit = { stand_id: stand.id, stand_name: stand.name, flag: stand.flag, stamp_type: stand.stamp_type, stamp_image: stand.stamp_image, visit_method: visitMethod };
       return json(data, 201);
     }
 
@@ -485,15 +516,19 @@ const existing = await db
       const token = crypto.randomUUID();
       const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
       const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
+      const secretWord = cleanText(b.secret_word, SECRET_WORD_MAX) || null;
+      const dup = await wordOwner(db, secretWord, null);
+      if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
-          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0
+          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0,
+          secretWord
         )
         .run();
       return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
@@ -503,25 +538,41 @@ const existing = await db
     if (m) {
       const id = Number(m[1]);
       if (method === 'PUT' && !m[2]) {
+        // Actualización parcial: solo se tocan los campos presentes en el body.
+        // Así "activar/desactivar" o editar sin subir imagen no borra el resto del stand.
         const b = await req.json().catch(() => ({}));
-        const cur = await db.prepare('SELECT name FROM stands WHERE id = ?').bind(id).first();
+        const cur = await db.prepare('SELECT * FROM stands WHERE id = ?').bind(id).first();
         if (!cur) return json({ error: 'stand no encontrado' }, 404);
-        let name = cur.name;
-        if (typeof b.name === 'string') {
-          name = cleanText(b.name, 60);
-          if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
+        const has = (k) => b[k] !== undefined;
+        const name = has('name') ? cleanText(b.name, 60) : cur.name;
+        if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
+        const stampType = has('stamp_type')
+          ? ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag'
+          : cur.stamp_type || 'flag';
+        let stampImage = cur.stamp_image ?? null;
+        if (has('stamp_image')) {
+          stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
         }
-        const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
-        const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
+        const secretWord = has('secret_word') ? cleanText(b.secret_word, SECRET_WORD_MAX) || null : cur.secret_word ?? null;
+        const dup = await wordOwner(db, secretWord, id);
+        if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
         await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
-                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ? WHERE id = ?`
+                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ? WHERE id = ?`
           )
           .bind(
-            name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
-            cleanText(b.flag, 4) || '🌍', b.is_published === false ? 0 : 1,
-            cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0, id
+            name,
+            has('course') ? cleanText(b.course, 60) : cur.course ?? null,
+            has('description') ? cleanText(b.description, 300) : cur.description ?? null,
+            has('area') ? cleanText(b.area, 60) : cur.area ?? null,
+            has('flag') ? cleanText(b.flag, 4) || '🌍' : cur.flag || '🌍',
+            has('is_published') ? (b.is_published === false ? 0 : 1) : cur.is_published,
+            has('stamp_icon') ? cleanText(b.stamp_icon, 8) || null : cur.stamp_icon ?? null,
+            has('stamp_color') ? String(b.stamp_color ?? '') : cur.stamp_color ?? '',
+            stampType, stampImage,
+            has('sort_order') ? Number(b.sort_order) || 0 : cur.sort_order ?? 0,
+            secretWord, id
           )
           .run();
         return json({ ok: true });
@@ -586,16 +637,20 @@ const existing = await db
     if (method === 'GET' && path === '/api/admin/export/visitas.csv') {
       const { results } = await db
         .prepare(
-          `SELECT v.id, v.rating, v.comment, v.created_at,
+          `SELECT v.id, v.rating, v.comment, v.created_at, v.visit_method,
                   vis.id AS visitor_id, COALESCE(vis.name, 'Anónimo') AS visitor_name, s.name AS stand_name
            FROM visits v JOIN stands s ON s.id = v.stand_id
            LEFT JOIN visitors vis ON vis.id = v.visitor_id
            ORDER BY v.id`
         )
         .all();
-      const rows = [['id', 'visitante_id', 'visitante', 'stand', 'fecha', 'rating', 'comentario']];
+      // Columna 'metodo' al final: no se quita ninguna columna existente.
+      const rows = [['id', 'visitante_id', 'visitante', 'stand', 'fecha', 'rating', 'comentario', 'metodo']];
       for (const v of results) {
-        rows.push([v.id, v.visitor_id, v.visitor_name, v.stand_name, v.created_at, v.rating ?? '', v.comment ?? '']);
+        rows.push([
+          v.id, v.visitor_id, v.visitor_name, v.stand_name, v.created_at, v.rating ?? '', v.comment ?? '',
+          v.visit_method === 'secret' ? 'Palabra' : 'QR',
+        ]);
       }
       return csvResponse(rows, 'visitas.csv');
     }

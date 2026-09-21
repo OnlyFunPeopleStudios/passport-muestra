@@ -15,6 +15,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | V0.4 | ✅ Sellos: 4 tipos (bandera/ícono/imagen/color), banderas SVG de los 13 países y motor único de render |
 | V0.5 | 🟡 Deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar`; pruebas reales pendientes |
 | **V0.6** | ✅ Modo offline del visitante: service worker, catálogo de stands y visitas en el dispositivo, cola de sincronización idempotente |
+| **V0.7** | ✅ Palabra secreta del stand: vía alternativa al QR para registrar visitas, funciona online y offline, con `visit_method` (`qr`/`secret`) y CSV actualizado |
 
 ## Stack
 
@@ -51,8 +52,8 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0004)
-npm run db:seed    # carga 14 stands (13 países; Marruecos tiene 2 stands)
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0005)
+npm run db:seed    # carga 14 stands (13 países, con palabras secretas; Marruecos tiene 2 stands independientes)
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
 npm run dev        # sirve en http://localhost:8787
 ```
@@ -63,15 +64,15 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
-Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 89 chequeos).
+Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 90 chequeos).
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 
 ## Uso
 
 1. Abrí `http://localhost:8787` → **Crear mi pasaporte** (nombre opcional).
-2. Desde el menú **🖨️ QR**: generá el QR de cada stand, descargalo e imprimilo para pegarlo en el stand.
-3. Desde el menú **📷 Escanear**: apuntá la cámara al QR de un stand.
+2. Desde el menú **🖨️ QR**: generá el QR de cada stand, descargalo e imprimilo para pegarlo en el stand (escribe la palabra secreta en un cartel junto al QR).
+3. Desde el menú **📷 Escanear**: apuntá la cámara al QR de un stand. Si no tenés cámara, tocá **🔑 Tengo la palabra del stand** y escribí la palabra que ves en el cartel del stand.
 4. El sello (bandera del país del stand) aparece en **🛂 Pasaporte**, con progreso `8 / 14 · 57%`. En el sello se muestran las estrellas si ya lo evaluaste.
 5. Justo después de visitar un stand se abre la evaluación: **⭐ 1–5** (obligatoria para guardar) + **comentario opcional** (máx. 200 caracteres, con contador y filtro básico de lenguaje).
 6. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
@@ -81,8 +82,8 @@ Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 
 
 Después de la primera visita **con conexión**, la app sigue funcionando sin Internet (útil en la feria, donde el WiFi de los stands puede fallar):
 
-- El **service worker** (`public/sw.js`) cachea la app, los stands y los sellos; el panel `/admin` y los datos de otros visitantes nunca se cachean.
-- Escanear un stand sin conexión registra la visita en el dispositivo (IndexedDB) y la sella al instante, sin duplicados.
+- El **service worker** (`public/sw.js`) cachea la app, los stands (incluyendo sus palabras secretas) y los sellos; el panel `/admin` y los datos de otros visitantes nunca se cachean.
+- Escanear un stand sin conexión registra la visita en el dispositivo (IndexedDB) y la sella al instante, sin duplicados. La palabra secreta funciona exactamente igual: se resuelve contra el catálogo del dispositivo y se sincroniza al recuperar la conexión.
 - Puntuar y comentar también funciona offline.
 - Al recuperar la conexión se **sincroniza sola** (al volver a abrir, al pasar a primer plano o al detectar red). Cada operación lleva un `operation_id` local y el reenvío es idempotente: `UNIQUE(visitor_id, stand_id)` responde 409 en visitas y `/api/evaluate` es un `UPDATE`, así que reintentar nunca duplica ni pierde datos.
 - Un indicador discreto abajo muestra el estado: `● Conectado`, `○ Sin conexión · guardado en este dispositivo` o `↻ N pendientes`.
@@ -92,7 +93,7 @@ Después de la primera visita **con conexión**, la app sigue funcionando sin In
 Los organizadores entran a `/admin` y tienen:
 
 - **📊 Resumen**: totales (visitantes, sellos, stands activos, evaluaciones, promedio ⭐), ranking de stands, actividad reciente y exportación rápida.
-- **🏫 Stands**: crear, editar, reordenar, activar/desactivar, regenerar QR y eliminar (borrado lógico: se ocultan conservando visitas y evaluaciones).
+- **🏫 Stands**: crear, editar (incluyendo **palabra secreta** para registrar visitas sin QR), reordenar, activar/desactivar, regenerar QR y eliminar (borrado lógico: se ocultan conservando visitas y evaluaciones).
 - **🎨 Diseño y marca**: nombre, subtítulo, institución, descripción, **paleta de colores** (6 presets), **logo** del evento, estilo del sello (circular/estampilla/cuadrado) y todos los textos de la app. Todo con **vista previa en vivo**; nada cambia hasta tocar **Guardar**.
 - **💬 Comentarios**: marcar como revisado ✅, ocultar/mostrar 👁️ o borrar 🗑️ (borrar el comentario conserva la valoración).
 - **🧑‍🎓 Visitantes**: lista con progreso y última actividad.
@@ -179,6 +180,9 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 ## Deployment en Cloudflare
 
 > **Estado: desplegado y operativo.** El Worker `passport-muestra` sirve en **https://pasaporte.onlyfunpeople.com.ar** (custom domain declarado en `wrangler.jsonc` → `routes` con `custom_domain: true`). La D1 `passport-db` ya está creada y su `database_id` está cargado. Los pasos 1-2 solo hacen falta si se rehace desde cero.
+>
+> **Migración 0005** agrega las columnas `secret_word` y `visit_method` (no destructiva). Para aplicar sobre la DB de producción existente:
+> `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
 
 1. `npx wrangler login`
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
@@ -187,6 +191,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0002_admin_config.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0003_admin_auth.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0004_stamps.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
 4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
 5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
 6. `npx wrangler deploy`
@@ -209,3 +214,4 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.4** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) + banderas SVG.
 - **V0.5** 🟡 deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar` (custom domain + HTTPS); pruebas reales en la feria pendientes.
 - **V0.6** ✅ modo offline del visitante: service worker + Cache API (app, stands, sellos), IndexedDB (catálogo, visitas y cola), sincronización idempotente al recuperar la conexión e indicador de estado. Sin endpoints nuevos: reutiliza `/api/visits` (409 = ya aplicado) y `/api/evaluate` (UPDATE idempotente).
+- **V0.7** ✅ palabra secreta del stand: vía alternativa al QR, `visit_method` (`qr`/`secret`), validación offline y online, PUT parcial del admin (no borra al activar/desactivar), CSV con columna `metodo`.

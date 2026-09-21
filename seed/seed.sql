@@ -18,3 +18,22 @@ INSERT INTO stands (slug, name, course, description, area, flag, token) VALUES
 ('ecosistemas-asiaticos', 'Ecosistemas asiáticos', '1.º C', 'Fauna y flora de los grandes ecosistemas de Asia', 'Ciencias Naturales', 'cn', 'c2a61ce407d30f4c111e'),
 ('marruecos-videos', 'Marruecos — Proyección de videos', '4.º A', 'Cortos y documentales sobre la cultura marroquí', 'Audiovisual', 'ma', '2a86cfe2f872f1cdbb64'),
 ('marruecos-fotografia', 'Marruecos — Muestra fotográfica', '4.º B', 'Fotografías de paisajes y ciudades de Marruecos', 'Fotografía', 'ma', '3d899cbce99346a7ef94');
+
+-- V0.7: palabra secreta de cada stand (vía alternativa al QR).
+-- Es la palabra que se imprime y se pega físicamente en el stand. Se puede
+-- cambiar en cualquier momento desde el Centro de Mando (Stands → Editar).
+-- Cada stand tiene la suya; los dos stands de Marruecos NO la comparten.
+UPDATE stands SET secret_word = 'AMBIENTE'  WHERE slug = 'ambientes-ambientales';
+UPDATE stands SET secret_word = 'ROBOTICA'  WHERE slug = 'robotica-sustentable';
+UPDATE stands SET secret_word = 'NAVEGANTE' WHERE slug = 'navegantes-portugueses';
+UPDATE stands SET secret_word = 'PIRAMIDE'  WHERE slug = 'antiguo-egipto';
+UPDATE stands SET secret_word = 'TACOS'     WHERE slug = 'cocina-mexicana';
+UPDATE stands SET secret_word = 'CONQUISTA' WHERE slug = 'conquista-america';
+UPDATE stands SET secret_word = 'RENACER'   WHERE slug = 'renacimiento';
+UPDATE stands SET secret_word = 'ORIGAMI'   WHERE slug = 'cultura-japonesa';
+UPDATE stands SET secret_word = 'CAFETAL'   WHERE slug = 'cafe-biodiversidad';
+UPDATE stands SET secret_word = 'COHETE'    WHERE slug = 'carrera-espacial';
+UPDATE stands SET secret_word = 'MAQUINA'   WHERE slug = 'revolucion-industrial';
+UPDATE stands SET secret_word = 'PANDA'     WHERE slug = 'ecosistemas-asiaticos';
+UPDATE stands SET secret_word = 'CINE'      WHERE slug = 'marruecos-videos';
+UPDATE stands SET secret_word = 'FOTO'      WHERE slug = 'marruecos-fotografia';

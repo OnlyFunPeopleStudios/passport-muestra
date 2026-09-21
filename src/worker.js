@@ -191,7 +191,10 @@ const clearCookie = (secure) => `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max
 // ---------- CSV ----------
 
 const csvCell = (v) => {
-  const s = v == null ? '' : String(v);
+  let s = v == null ? '' : String(v);
+  // Anti formula-injection: si el campo empieza con un carácter que Excel/Sheets
+  // interpretaría como fórmula, se antepone un apóstrofo (el dato no se pierde).
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 };
 const csv = (rows) => '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');

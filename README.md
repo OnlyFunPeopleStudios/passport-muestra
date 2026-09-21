@@ -20,7 +20,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 - **Cloudflare Workers** (JavaScript, sin dependencias de runtime) → API.
 - **Cloudflare D1** (SQLite) → base de datos. Anti-duplicado resuelto en la DB: `UNIQUE(visitor_id, stand_id)`.
 - **Static Assets** de Cloudflare → PWA del visitante (HTML/CSS/JS vanilla, sin framework).
-- QR: `html5-qrcode` (lectura con cámara) + `qrcode-generator` (generación/imán impresión), ambos MIT.
+- QR: `html5-qrcode` (lectura con cámara, Apache-2.0) + `qrcode-generator` (generación/impresión, MIT). Banderas SVG: `flag-icons` (MIT). Detalle de licencias en `THIRD_PARTY.md`.
 
 Una sola pieza de servidor. Dev local con `wrangler dev`; el mismo código se despliega en Cloudflare sin reescribir nada.
 
@@ -50,8 +50,8 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migraciones 0001 y 0002)
-npm run db:seed    # carga 15 stands de prueba
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0004)
+npm run db:seed    # carga 14 stands (13 países; Marruecos tiene 2 stands)
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
 npm run dev        # sirve en http://localhost:8787
 ```
@@ -69,7 +69,7 @@ Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 
 1. Abrí `http://localhost:8787` → **Crear mi pasaporte** (nombre opcional).
 2. Desde el menú **🖨️ QR**: generá el QR de cada stand, descargalo e imprimilo para pegarlo en el stand.
 3. Desde el menú **📷 Escanear**: apuntá la cámara al QR de un stand.
-4. El sello (bandera del país del stand) aparece en **🛂 Pasaporte**, con progreso `8 / 15 · 53%`. En el sello se muestran las estrellas si ya lo evaluaste.
+4. El sello (bandera del país del stand) aparece en **🛂 Pasaporte**, con progreso `8 / 14 · 57%`. En el sello se muestran las estrellas si ya lo evaluaste.
 5. Justo después de visitar un stand se abre la evaluación: **⭐ 1–5** (obligatoria para guardar) + **comentario opcional** (máx. 200 caracteres, con contador y filtro básico de lenguaje).
 6. El botón **Visitar** en **🏫 Stands** simula el escaneo (útil sin cámara, para pruebas).
 7. Volver a escanear el mismo stand → «Este stand ya forma parte de tu pasaporte.» (HTTP 409, garantizado por `UNIQUE` en la DB). Mostrará tu evaluación si ya la dejaste, o un botón **Evaluar ahora** si no.
@@ -163,23 +163,27 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | GET | `/api/admin/visitors` | Visitantes con progreso |
 | GET | `/api/admin/export/visitas.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
 
-## Deployment futuro en Cloudflare
+## Deployment en Cloudflare
+
+> La D1 `passport-db` ya está creada y su `database_id` está cargado en `wrangler.jsonc`. Los pasos 1-2 solo hacen falta si se rehace desde cero.
 
 1. `npx wrangler login`
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
-3. `npx wrangler d1 execute passport-db --remote --file=migrations/0001_init.sql`
-4. `npx wrangler d1 execute passport-db --remote --file=migrations/0002_admin_config.sql`
-5. `npx wrangler d1 execute passport-db --remote --file=migrations/0003_admin_auth.sql`
-6. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
-7. `wrangler secret put ADMIN_PASSWORD`
-8. `npx wrangler deploy`
-9. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
+3. Aplicar el esquema remoto, en orden:
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0001_init.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0002_admin_config.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0003_admin_auth.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0004_stamps.sql`
+4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
+5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
+6. `npx wrangler deploy`
+7. Bindear el dominio: `pasaporte.onlyfunpeople.com.ar` → este Worker.
 
 ## Assets y licencias
 
-- **`html5-qrcode`** (lector QR con cámara) — MIT. Vendor en `public/vendor/`, licencia en `LICENSE.html5-qrcode`.
+- **`html5-qrcode`** v2.3.8 (lector QR con cámara, incluye ZXing) — **Apache-2.0**. Vendor en `public/vendor/`, licencia en `LICENSE.html5-qrcode`.
 - **`qrcode-generator`** (generación de QR) — MIT. Vendor en `public/vendor/`, licencia en `LICENSE.qrcode-generator`.
-- **Banderas**: emojis de bandera (códigos ISO) en V0.1. Para V0.4 se migrará a **`flag-icons`** (https://github.com/lipis/flag-icons, MIT): colección SVG completa, permiso comercial y de modificación, sin atribución obligatoria (se documentará igual en el README).
+- **Banderas**: **`flag-icons`** v7.5.0 (https://github.com/lipis/flag-icons, MIT, © Panayiotis Lipiridis). Los SVG usados están en `public/stamps/`; la licencia MIT exige conservar el aviso de copyright, incluido en `THIRD_PARTY.md`.
 - Icono de la app: propio.
 - **Patrones reutilizados** de proyectos open source auditados (como *referencia conceptual*, sin copiar código): `bsides-passport-pwa` (estructura pasaporte/QR/admin), `nxsummit-game` (patrón `UNIQUE` anti-duplicado), `DomesticTouristPassport` (flujo visita+valoración+comentario), `kiosk-guestbook` (moderación/exportación), `holoquest` (token→hash). Proyecto nuevo e independiente desde cero.
 

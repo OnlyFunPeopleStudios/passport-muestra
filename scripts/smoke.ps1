@@ -408,6 +408,49 @@ Invoke-Api PUT '/api/admin/config' @{
 $cfgEnd = Invoke-Api GET '/api/config' $null -Cookie ''
 Check 'restaurar configuración demo' ($cfgEnd.data.config.event_name -eq 'Muestra Escolar 2026')
 
+# ---------- V0.5: export CSV (Excel + seguridad) ----------
+Write-Host ""
+Write-Host "== V0.5 (export CSV) ==" -ForegroundColor Cyan
+
+# 48-50. Datos con payloads: fórmula (= + @), comas, comillas, saltos y acentos
+$csvVis = Invoke-Api POST '/api/visitors' @{ name = '=SUM(A1:A9)' } -Cookie ''
+Check '48. visitante con nombre tipo fórmula -> 201 (dato intacto)' ($csvVis.ok -and $csvVis.status -eq 201 -and $csvVis.data.visitor.name -eq '=SUM(A1:A9)')
+$csvVt = $csvVis.data.visitor.token
+$csvStands = Invoke-Api GET '/api/stands' $null -Cookie ''
+$csvTok = $csvStands.data.stands[0].token
+Invoke-Api POST '/api/visits' @{ vt = $csvVt; tok = $csvTok } -Cookie '' | Out-Null
+$csvEv = Invoke-Api POST '/api/evaluate' @{ vt = $csvVt; tok = $csvTok; rating = 3; comment = '=HYPERLINK("http://evil","x")' } -Cookie ''
+Check '49. evaluación con payload =HYPERLINK -> 200' ($csvEv.ok -and $csvEv.status -eq 200)
+
+$accVis = Invoke-Api POST '/api/visitors' @{ name = 'Ñandú ÁÉÍÓÚ' } -Cookie ''
+$accVt = $accVis.data.visitor.token
+Invoke-Api POST '/api/visits' @{ vt = $accVt; tok = $csvTok } -Cookie '' | Out-Null
+$accComment = "Hola, `"mundo`"" + "`n" + "línea2, Ñ"
+$accEv = Invoke-Api POST '/api/evaluate' @{ vt = $accVt; tok = $csvTok; rating = 4; comment = $accComment } -Cookie ''
+Check '50. visitante con acentos y comentario complejo -> 201' ($accVis.ok -and $accEv.ok)
+
+# 51-58. visitas.csv: descarga, cabeceras, BOM, CRLF, neutralización y escapado
+$respA = Invoke-WebRequest -Uri "$Base/api/admin/export/visitas.csv" -UseBasicParsing -Headers @{ Cookie = $script:adminCookie } -TimeoutSec 30
+$rawA = $respA.Content
+$ctA = [string]$respA.Headers['Content-Type']
+$cdA = [string]$respA.Headers['Content-Disposition']
+Check '51. visitas.csv -> 200, Content-Type text/csv; charset=utf-8' ($respA.StatusCode -eq 200 -and $ctA -match 'text/csv' -and $ctA -match 'charset=utf-8')
+Check '52. visitas.csv -> descarga adjunta con nombre de archivo' ($cdA -match 'attachment' -and $cdA -match 'visitas\.csv')
+Check '53. visitas.csv -> BOM UTF-8 (Excel reconoce acentos)' ($rawA.Length -ge 1 -and [int][char]$rawA[0] -eq 0xFEFF)
+Check '54. visitas.csv -> saltos CRLF (formato Excel)' ($rawA -match "`r`n")
+Check '55. visitas.csv -> fórmula neutralizada con apóstrofo' ($rawA.Contains("'=SUM(A1:A9)") -and $rawA.Contains("'=HYPERLINK("))
+Check '56. visitas.csv -> ningún campo empieza con = + @ sin neutralizar' (-not ($rawA -match '(?m)(?:^|[,\r\n])[=+@]'))
+Check '57. visitas.csv -> escapado RFC4180 (comillas dobladas y comas)' ($rawA.Contains('Hola, ""mundo""') -and $rawA.Contains('línea2, Ñ'))
+Check '58. visitas.csv -> acentos y Ñ preservados (UTF-8)' ($rawA.Contains('Ñandú ÁÉÍÓÚ'))
+
+# 59-60. summary.csv: mismo tratamiento en el nombre de stand
+$evilStand = Invoke-Api POST '/api/admin/stands' @{ name = '=EVIL()'; is_published = $false }
+$respB = Invoke-WebRequest -Uri "$Base/api/admin/export/summary.csv" -UseBasicParsing -Headers @{ Cookie = $script:adminCookie } -TimeoutSec 30
+$rawB = $respB.Content
+Check '59. summary.csv -> 200, BOM y columna publicado (si/no)' ($respB.StatusCode -eq 200 -and $rawB.Length -ge 1 -and [int][char]$rawB[0] -eq 0xFEFF -and $rawB.Contains('publicado') -and ($rawB -match ',si' -or $rawB -match ',no'))
+Check '60. summary.csv -> nombre de stand tipo fórmula neutralizado' ($rawB.Contains("'=EVIL()"))
+if ($evilStand.ok) { Invoke-Api DELETE "/api/admin/stands/$($evilStand.data.stand.id)" | Out-Null }
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

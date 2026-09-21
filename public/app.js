@@ -361,6 +361,31 @@ function renderScan() {
   );
 }
 
+// Base pública de la app (funciona en raíz o en subruta; nunca hardcodea el dominio).
+const APP_BASE = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
+
+// QR como PNG real dibujado en canvas nativo (sin librerías extra): la extensión
+// del archivo (.png) y su contenido coinciden.
+function qrPngDataUrl(text, cell = 12, margin = 16) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount();
+  const size = n * cell + margin * 2;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) ctx.fillRect(margin + c * cell, margin + r * cell, cell, cell);
+    }
+  }
+  return cv.toDataURL('image/png');
+}
+
 function renderQR() {
   api('/api/stands').then(({ stands }) => {
     $view.innerHTML = `
@@ -378,12 +403,9 @@ function renderQR() {
       </div>`;
     stands.forEach((s) => {
       const card = $view.querySelector(`[data-tok="${CSS.escape(s.token)}"] .qr-img`);
-      const url = `${location.origin}${location.pathname}#/scan?tok=${s.token}`;
-      const qr = qrcode(0, 'M');
-      qr.addData(url);
-      qr.make();
+      const url = `${APP_BASE}#/scan?tok=${s.token}`;
       const img = document.createElement('img');
-      img.src = qr.createDataURL(8, 8);
+      img.src = qrPngDataUrl(url, 8, 8);
       img.alt = 'QR ' + s.name;
       card.appendChild(img);
     });
@@ -391,12 +413,9 @@ function renderQR() {
 }
 
 function downloadQr(tok, slug) {
-  const url = `${location.origin}${location.pathname}#/scan?tok=${tok}`;
-  const qr = qrcode(0, 'M');
-  qr.addData(url);
-  qr.make();
+  const url = `${APP_BASE}#/scan?tok=${tok}`;
   const a = document.createElement('a');
-  a.href = qr.createDataURL(12, 12);
+  a.href = qrPngDataUrl(url);
   a.download = `pasaporte-${slug}.png`;
   a.click();
 }

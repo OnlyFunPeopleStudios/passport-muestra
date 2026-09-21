@@ -174,6 +174,14 @@ async function renderStands() {
   pendingStandImage = null;
   $main.innerHTML = `
     <div class="toolbar"><h2>Stands</h2><button class="btn primary small" id="stand-new">+ Nuevo stand</button></div>
+    <section class="card" style="display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+      <div>
+        <h3>QR general de entrada</h3>
+        <p class="muted small">Imprimí este QR para el cartel de entrada. Abre el pasaporte (no registra ninguna visita ni corresponde a un stand).</p>
+        <button class="btn small ghost" id="entry-qr-dl">⬇️ Descargar QR de entrada</button>
+      </div>
+      <img id="entry-qr" alt="QR general de entrada" style="width:150px;height:150px">
+    </section>
     ${standFormHtml()}
     <section class="card">
       <h3>Listado (${stands.length})</h3>
@@ -197,6 +205,9 @@ async function renderStands() {
       </table>
       <p class="note">Eliminar oculta el stand pero conserva sus visitas y evaluaciones. Cada QR es único: usá "Descargar" siempre desde acá.</p>
     </section>`;
+
+  document.getElementById('entry-qr').src = qrPngDataUrl(APP_BASE);
+  document.getElementById('entry-qr-dl').addEventListener('click', () => downloadQrUrl(APP_BASE, 'pasaporte-entrada'));
 
   const form = document.getElementById('stand-form');
   const previewBox = document.getElementById('stand-stamp-preview');
@@ -331,15 +342,40 @@ async function renderStands() {
   );
 }
 
-function downloadQr(tok, slug) {
-  const url = `${location.origin}/#/scan?tok=${tok}`;
+// Base pública de la app (funciona en raíz o en subruta; nunca hardcodea el dominio).
+const APP_BASE = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
+
+// QR como PNG real dibujado en canvas nativo (sin librerías extra): la extensión
+// del archivo (.png) y su contenido coinciden.
+function qrPngDataUrl(text, cell = 12, margin = 16) {
   const qr = qrcode(0, 'M');
-  qr.addData(url);
+  qr.addData(text);
   qr.make();
+  const n = qr.getModuleCount();
+  const size = n * cell + margin * 2;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) ctx.fillRect(margin + c * cell, margin + r * cell, cell, cell);
+    }
+  }
+  return cv.toDataURL('image/png');
+}
+
+function downloadQrUrl(url, filename) {
   const a = document.createElement('a');
-  a.href = qr.createDataURL(12, 12);
-  a.download = `pasaporte-${slug || tok}.png`;
+  a.href = qrPngDataUrl(url);
+  a.download = filename + '.png';
   a.click();
+}
+
+function downloadQr(tok, slug) {
+  downloadQrUrl(`${APP_BASE}#/scan?tok=${tok}`, `pasaporte-${slug || tok}`);
 }
 
 // ---------- Diseño y marca ----------

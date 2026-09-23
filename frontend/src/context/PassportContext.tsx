@@ -2,8 +2,10 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { EventConfig, Stand, Visitor, Visit, VisitWithDetails, StampType } from '../types';
 import { DEFAULT_CONFIG } from '../data/seedData';
 import {
+  CatalogSource,
   CatalogStatus,
   CATALOG_UNAVAILABLE_ERROR,
+  catalogFailureInfo,
   hasWordInput,
   loadCatalog,
   resolveStand,
@@ -150,6 +152,7 @@ export interface RecordVisitResult {
   success: boolean;
   already?: boolean;
   error?: string;
+  errorTitle?: string;
   stand?: Stand;
   visit?: Visit;
 }
@@ -163,7 +166,9 @@ interface PassportContextType {
   config: EventConfig;
   stands: Stand[];
   catalogStatus: CatalogStatus;
+  catalogSource: CatalogSource;
   catalogReady: boolean;
+  refreshCatalog: () => Promise<void>;
   visitors: Visitor[];
   visits: Visit[];
   currentVisitor: Visitor | null;
@@ -221,6 +226,12 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     catalogStatusRef.current = status;
     setCatalogStatusState(status);
   };
+  const [catalogSource, setCatalogSourceState] = useState<CatalogSource>('none');
+  const catalogSourceRef = useRef<CatalogSource>('none');
+  const setCatalogSource = (source: CatalogSource) => {
+    catalogSourceRef.current = source;
+    setCatalogSourceState(source);
+  };
   const [currentVisitor, setCurrentVisitorState] = useState<Visitor | null>(readStoredVisitor);
   const [visitorVisits, setVisitorVisits] = useState<Visit[]>([]);
   const [adminVisits, setAdminVisits] = useState<Visit[]>([]);
@@ -254,6 +265,7 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       setStands(result.stands.map(standFromApi));
       setCatalogStatus(result.status);
+      setCatalogSource(result.source);
     } finally {
       catalogFetchingRef.current = false;
     }
@@ -425,16 +437,12 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       outcome = resolveStand(catalogStatusRef.current, standsRef.current, { token, word });
     }
     if (outcome.state === 'pending' || outcome.state === 'unavailable') {
-      return { success: false, error: CATALOG_UNAVAILABLE_ERROR };
+      const info = catalogFailureInfo('empty', 'none', 'qr');
+      return { success: false, error: info.detail, errorTitle: info.title };
     }
     if (outcome.state === 'not-found') {
-      return {
-        success: false,
-        error:
-          outcome.method === 'secret'
-            ? 'La palabra secreta no coincide con ningún stand.'
-            : 'Código QR no reconocido o stand inactivo.',
-      };
+      const info = catalogFailureInfo(catalogStatusRef.current, catalogSourceRef.current, outcome.method);
+      return { success: false, error: info.detail, errorTitle: info.title };
     }
 
     const stand: Stand = outcome.stand;
@@ -787,7 +795,9 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         config,
         stands,
         catalogStatus,
+        catalogSource,
         catalogReady: catalogStatus === 'ready',
+        refreshCatalog,
         visitors: displayVisitors,
         visits: displayVisits,
         currentVisitor,

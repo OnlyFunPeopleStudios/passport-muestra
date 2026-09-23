@@ -8,7 +8,19 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const { loadCatalog, resolveStand, findStandByToken, findStandByWord, hasWordInput } = await import(
+const {
+  loadCatalog,
+  resolveStand,
+  findStandByToken,
+  findStandByWord,
+  hasWordInput,
+  catalogFailureInfo,
+  isCatalogFailure,
+  CATALOG_UNAVAILABLE_ERROR,
+  CATALOG_STALE_HINT,
+  NOT_FOUND_QR_ERROR,
+  NOT_FOUND_WORD_ERROR,
+} = await import(
   pathToFileURL(join(here, '..', 'frontend', 'src', 'context', 'catalog.ts')).href
 );
 
@@ -146,8 +158,31 @@ const oculto = { id: 3, slug: 'oculto', name: 'Oculto', token: 'tok-oculto-zzz99
 // I. Service Worker cambia de versión (invalida el cache viejo del catálogo)
 {
   const sw = readFileSync(join(here, '..', 'public', 'sw.js'), 'utf8');
-  check('I1. SW usa pm-v2 (invalida pm-v1)', /const VERSION = 'pm-v2'/.test(sw));
+  check('I1. SW usa pm-v3 (invalida pm-v2 y pm-v1)', /const VERSION = 'pm-v3'/.test(sw));
   check('I2. el activate borra caches que no arrancan con la versión actual', /keys\.filter/.test(sw) && /!k\.startsWith\(VERSION\)/.test(sw));
+}
+
+// K. catalogFailureInfo: el error distingue el ORIGEN (catálogo vs local vs no-match).
+{
+  const empty = catalogFailureInfo('empty', 'none', 'qr');
+  check('K1. catálogo sin datos -> título "Catálogo no disponible" (no "código no reconocido")', empty.title === 'Catálogo no disponible' && empty.kind === 'no-catalog' && empty.detail === CATALOG_UNAVAILABLE_ERROR);
+
+  const qr = catalogFailureInfo('ready', 'network', 'qr');
+  check('K2. red fresca + QR sin match -> "Código no reconocido" con mensaje exacto', qr.title === 'Código no reconocido' && qr.kind === 'not-found' && qr.detail === NOT_FOUND_QR_ERROR);
+
+  const word = catalogFailureInfo('ready', 'network', 'secret');
+  check('K3. red fresca + palabra sin match -> mensaje exacto de palabra', word.detail === NOT_FOUND_WORD_ERROR && word.title === 'Código no reconocido');
+
+  const local = catalogFailureInfo('ready', 'local', 'qr');
+  check('K4. catálogo LOCAL (posible viejo) -> "Datos desactualizados" + hint de conexión', local.title === 'Datos desactualizados' && local.kind === 'stale-local' && local.detail.includes(NOT_FOUND_QR_ERROR) && local.detail.includes(CATALOG_STALE_HINT));
+
+  check('K5. isCatalogFailure detecta catálogo no disponible', isCatalogFailure({ error: CATALOG_UNAVAILABLE_ERROR }) === true);
+  check('K6. isCatalogFailure detecta datos desactualizados por título', isCatalogFailure({ errorTitle: 'Datos desactualizados' }) === true);
+  check('K7. isCatalogFailure NO marca un "código no reconocido" real', isCatalogFailure({ error: NOT_FOUND_QR_ERROR }) === false);
+
+  // Loading (el fix espera): nunca un "código no reconocido" mientras carga.
+  const pending = catalogFailureInfo('loading', 'none', 'qr');
+  check('K8. catálogo cargando -> no-catalog (nunca not-found)', pending.kind === 'no-catalog');
 }
 
 console.log('');

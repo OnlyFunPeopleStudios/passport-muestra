@@ -2,7 +2,9 @@
 // Cachea la app (shell), los stands y los sellos para que la app siga abriendo
 // sin conexión. Nunca cachea /api/admin ni sirve el panel offline.
 // pm-v2: invalida el cache pm-v1 que podía servir un catálogo de stands viejo.
-const VERSION = 'pm-v2';
+// pm-v3: invalida el cache pm-v2 (shell/bundle viejos que quedaron en celulares)
+// y obliga a re-descargar la app actual con el catálogo resilient.
+const VERSION = 'pm-v3';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

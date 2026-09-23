@@ -12,6 +12,45 @@ export type CatalogStatus = 'loading' | 'ready' | 'empty';
 export const CATALOG_UNAVAILABLE_ERROR =
   'No se pudo cargar el catálogo de stands. Verificá tu conexión a internet e intentá de nuevo.';
 
+// Mensajes exactos que ya conoce el usuario (se mantienen para compatibilidad).
+export const NOT_FOUND_QR_ERROR = 'Código QR no reconocido o stand inactivo.';
+export const NOT_FOUND_WORD_ERROR = 'La palabra secreta no coincide con ningún stand.';
+export const CATALOG_STALE_HINT =
+  'Puede que los datos guardados en este dispositivo estén desactualizados. Conectate a internet e intentá de nuevo.';
+
+export type CatalogSource = 'network' | 'local' | 'none';
+
+export interface CatalogFailureInfo {
+  title: string;
+  detail: string;
+  kind: 'no-catalog' | 'stale-local' | 'not-found';
+}
+
+/**
+ * Traduce un fallo de resolución del catálogo a un mensaje que distingue el
+ * ORIGEN del problema (requisito de la auditoría):
+ *   - catálogo sin datos        -> "Catálogo no disponible" (no "código no reconocido")
+ *   - catálogo local (viejo)    -> "Datos desactualizados" + hint de conexión
+ *   - catálogo fresco sin match -> "Código no reconocido"
+ */
+export function catalogFailureInfo(
+  status: CatalogStatus,
+  source: CatalogSource,
+  method: 'qr' | 'secret'
+): CatalogFailureInfo {
+  if (status !== 'ready') {
+    return { title: 'Catálogo no disponible', detail: CATALOG_UNAVAILABLE_ERROR, kind: 'no-catalog' };
+  }
+  const base = method === 'secret' ? NOT_FOUND_WORD_ERROR : NOT_FOUND_QR_ERROR;
+  if (source === 'local') {
+    return { title: 'Datos desactualizados', detail: `${base} ${CATALOG_STALE_HINT}`, kind: 'stale-local' };
+  }
+  return { title: 'Código no reconocido', detail: base, kind: 'not-found' };
+}
+
+export const isCatalogFailure = (r: { error?: string; errorTitle?: string }) =>
+  r?.error === CATALOG_UNAVAILABLE_ERROR || r?.errorTitle === 'Catálogo no disponible' || r?.errorTitle === 'Datos desactualizados';
+
 /** Mínimo de un stand que necesita el flujo visitante (tipado estructural: Stand cumple esto). */
 export interface CatalogStand {
   id: number;

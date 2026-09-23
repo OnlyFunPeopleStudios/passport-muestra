@@ -14,6 +14,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { isCatalogFailure } from '../context/catalog';
 
 interface ScannerModalProps {
   onClose: () => void;
@@ -38,7 +39,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   initialTok,
   onInitialHandled,
 }) => {
-  const { stands, config, recordVisit, catalogStatus } = usePassport();
+  const { stands, config, recordVisit, catalogStatus, catalogSource, refreshCatalog } = usePassport();
   const recordVisitRef = useRef(recordVisit);
   recordVisitRef.current = recordVisit;
 
@@ -53,6 +54,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     stand?: Stand;
     visit?: Visit;
     error?: string;
+    errorTitle?: string;
   } | null>(null);
 
   const handleToken = async (tok: string) => {
@@ -250,11 +252,28 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-base font-bold text-rose-500">
-                    {scanResult.already ? 'Ya visitado' : 'Código no reconocido'}
+                    {scanResult.already
+                      ? 'Ya visitado'
+                      : scanResult.errorTitle === 'Catálogo no disponible'
+                        ? 'Catálogo no disponible'
+                        : scanResult.errorTitle === 'Datos desactualizados'
+                          ? 'Datos desactualizados'
+                          : 'Código no reconocido'}
                   </h4>
                   <p className="text-xs text-slate-500">
                     {scanResult.error || 'La palabra secreta ingresada no coincide con ningún stand de la muestra.'}
                   </p>
+                  {isCatalogFailure(scanResult) && (
+                    <button
+                      onClick={() => {
+                        setScanResult(null);
+                        void refreshCatalog();
+                      }}
+                      className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 underline mt-1 cursor-pointer"
+                    >
+                      Reintentar carga del catálogo
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={() => setScanResult(null)}

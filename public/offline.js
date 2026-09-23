@@ -108,10 +108,25 @@
         t.oncomplete = resolve;
         t.onerror = () => reject(t.error);
       });
+      // Marca de frescura (transacción aparte: no rompe ambientes con una sola
+      // store): permite distinguir un catálogo local viejo de un "no reconocido".
+      await safe(
+        new Promise((resolve, reject) => {
+          const t = db.transaction(META, 'readwrite');
+          t.objectStore(META).put({ k: 'catalog_saved_at', v: Date.now() });
+          t.oncomplete = resolve;
+          t.onerror = () => reject(t.error);
+        }),
+        null
+      );
     } catch {}
   }
 
   const getStands = () => safe(getAll(STANDS), []);
+  const getCatalogMeta = async () => {
+    const row = await safe(get(META, 'catalog_saved_at'), null);
+    return { saved_at_ms: row ? row.v : null };
+  };
   const findStandByToken = (tok) => getStands().then((all) => all.find((s) => s.token === tok) || null);
   const findStandByWord = (word) => getStands().then((all) => matchStandByWord(all, word));
 
@@ -294,6 +309,7 @@
     isOnline,
     saveStands,
     getStands,
+    getCatalogMeta,
     findStandByToken,
     findStandByWord,
     normalizeWord,

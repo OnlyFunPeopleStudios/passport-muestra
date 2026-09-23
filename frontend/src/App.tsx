@@ -17,8 +17,7 @@ import {
   ShieldAlert, 
   Smartphone, 
   QrCode, 
-  Monitor, 
-  Heart
+  Monitor
 } from 'lucide-react';
 
 export function App() {
@@ -256,8 +255,16 @@ export function App() {
       {/* Footer */}
       <footer className="py-4 text-center text-xs text-slate-500 border-t border-black/5 dark:border-white/5 space-y-1">
         <p>{config.texts.footer_text || 'Muestra Escolar 2026'}</p>
-        <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
-          Hecho con <Heart className="w-3 h-3 text-rose-500 fill-rose-500 inline" /> para la comunidad educativa
+        <p className="text-[10px] text-slate-400">
+          OnlyFunPeople Studios —{' '}
+          <a
+            href="https://onlyfunpeople.com.ar"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-slate-600 dark:hover:text-slate-300 transition underline underline-offset-2"
+          >
+            onlyfunpeople.com.ar
+          </a>
         </p>
       </footer>
     </div>

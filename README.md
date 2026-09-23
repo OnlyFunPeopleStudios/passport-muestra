@@ -179,6 +179,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | GET | `/api/admin/visitors` | Visitantes con progreso |
 | GET | `/api/admin/export/visitas.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
 | POST | `/api/admin/reset-visits` | `{ password }` → vacía `visits` tras confirmar la contraseña actual/password de arranque (mantiene stands, visitantes, config) |
+| POST | `/api/admin/reset-visitors` | `{ password }` → borra TODOS los visitantes y su actividad (visitas/evaluaciones). Conserva stands y config |
 
 ## Deployment en Cloudflare
 

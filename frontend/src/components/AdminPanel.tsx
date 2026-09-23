@@ -70,6 +70,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     moderateComment,
     exportCSV,
     resetVisits,
+    resetVisitors,
   } = usePassport();
 
   const [activeTab, setActiveTab] = useState<
@@ -125,6 +126,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
   const [resetPw, setResetPw] = useState('');
   const [resetMsg, setResetMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+
+  // Borrado de visitantes
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearPw, setClearPw] = useState('');
+  const [clearMsg, setClearMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [clearBusy, setClearBusy] = useState(false);
+
+  const handleClearVisitors = async () => {
+    if (!clearPw.trim()) {
+      setClearMsg({ type: 'err', text: 'Ingresá la contraseña para confirmar.' });
+      return;
+    }
+    setClearBusy(true);
+    setClearMsg(null);
+    const r = await resetVisitors(clearPw);
+    setClearBusy(false);
+    if (r.success) {
+      setClearOpen(false);
+      setClearPw('');
+      setClearMsg(null);
+    } else {
+      setClearMsg({ type: 'err', text: r.error || 'No se pudieron eliminar los visitantes.' });
+    }
+  };
 
   const handleResetVisits = async () => {
     if (!resetPw.trim()) {
@@ -1717,13 +1742,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
                 Seguimiento del avance de cada pasaporte digital emitido.
               </p>
             </div>
-            <button
-              onClick={() => exportCSV('visitas')}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Descargar Visitas (CSV)
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setClearPw('');
+                  setClearMsg(null);
+                  setClearOpen(true);
+                }}
+                title="Elimina TODOS los visitantes registrados (y sus sellos, comentarios y puntajes)."
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Borrar visitantes
+              </button>
+              <button
+                onClick={() => exportCSV('visitas')}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Descargar Visitas (CSV)
+              </button>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
@@ -1954,6 +1993,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow transition cursor-pointer disabled:cursor-not-allowed"
               >
                 {resetBusy ? 'Eliminando...' : 'Eliminar todo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    {/* Modal: borrar visitantes (pide contraseña de admin) */}
+      {clearOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-slate-800 dark:text-slate-100">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 shrink-0 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/20">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-sm">Borrar visitantes</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Elimina <b className="text-rose-500">todos</b> los visitantes registrados y su actividad
+                  (sellos, comentarios y puntajes). Los stands y la configuración se conservan. No se puede
+                  deshacer.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                Contraseña del Centro de Mando
+              </label>
+              <input
+                type="password"
+                value={clearPw}
+                onChange={e => setClearPw(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void handleClearVisitors();
+                }}
+                placeholder="Ingresá la contraseña para confirmar..."
+                className="w-full px-4 py-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl focus:outline-none focus:border-rose-500 text-slate-900 dark:text-slate-100"
+                autoFocus
+              />
+            </div>
+
+            {clearMsg && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 text-xs text-rose-600 dark:text-rose-400">
+                {clearMsg.text}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setClearOpen(false)}
+                className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void handleClearVisitors()}
+                disabled={clearBusy}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow transition cursor-pointer disabled:cursor-not-allowed"
+              >
+                {clearBusy ? 'Eliminando...' : 'Borrar todo'}
               </button>
             </div>
           </div>

@@ -170,6 +170,7 @@ interface PassportContextType {
   adminLogout: () => Promise<void>;
   changeAdminPassword: (current: string, next: string, confirm: string) => Promise<AdminActionResult>;
   resetVisits: (password: string) => Promise<AdminActionResult>;
+  resetVisitors: (password: string) => Promise<AdminActionResult>;
   updateConfig: (newConfig: Partial<EventConfig>) => Promise<void>;
   updateStand: (id: number, updates: Partial<Stand>) => Promise<void>;
   createStand: (data: Omit<Stand, 'id' | 'token'>) => Promise<Stand>;
@@ -577,6 +578,21 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { success: true };
   };
 
+  const resetVisitors = async (password: string): Promise<AdminActionResult> => {
+    const res = await fetch('/api/admin/reset-visitors', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ password }),
+    }).catch(() => null);
+    if (!res) return { success: false, error: 'Sin conexión. Verificá tu internet.' };
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      return { success: false, error: d.error || 'No se pudieron eliminar los visitantes.' };
+    }
+    await refreshAdminData();
+    return { success: true };
+  };
+
   // ---------- CRUD de stands y config ----------
 
   const updateConfig = async (newConfig: Partial<EventConfig>) => {
@@ -709,6 +725,7 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         adminLogout,
         changeAdminPassword,
         resetVisits,
+        resetVisitors,
         updateConfig,
         updateStand,
         createStand,

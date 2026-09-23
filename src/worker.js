@@ -459,6 +459,18 @@ const existing = await db
       return json({ ok: true, deleted: meta.changes });
     }
 
+    // Borrar todos los visitantes (y sus visitas/evaluaciones): pide la contraseña de admin como
+    // confirmación explícita además de la sesión (acción destructiva y no reversible).
+    if (method === 'POST' && path === '/api/admin/reset-visitors') {
+      const b = await req.json().catch(() => ({}));
+      if (!(await verifyPassword(db, env, String(b.password ?? '')))) {
+        return json({ error: 'Contraseña incorrecta. No se eliminó nada.' }, 401);
+      }
+      const r1 = await db.prepare('DELETE FROM visits').run();
+      const r2 = await db.prepare('DELETE FROM visitors').run();
+      return json({ ok: true, deleted: r1.meta.changes + r2.meta.changes });
+    }
+
     if (method === 'POST' && path === '/api/admin/password') {
       const b = await req.json().catch(() => ({}));
       if (!(await verifyPassword(db, env, String(b.current ?? '')))) {

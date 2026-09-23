@@ -604,6 +604,13 @@ Check '89. migración 0005 agrega secret_word y visit_method (sin DROP/DELETE)' 
 # 90. UI: el Centro de Mando (React) edita la palabra secreta y la app offline es capaz por palabra
 Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -match 'secret_word' -and $offSrc -match 'visitByWordOffline' -and $offSrc -match 'matchStandByWord' -and $idxSrc -match 'offline\.js')
 
+# 91-94. Fix del catálogo visitante: SW v2 invalida el cache viejo y la UI espera
+# catalogReady antes de resolver (QR y palabra comparten el mismo flujo seguro).
+Check '91. SW pm-v2 invalida el cache pm-v1 del catálogo' ($swSrc -match "VERSION = 'pm-v2'")
+Check '92. activate elimina caches que no arrancan con la versión actual' ($swSrc -match '!k\.startsWith\(VERSION\)' -and $swSrc -match 'keys\.filter')
+Check '93. la app React espera el catálogo antes de resolver (Preparando pasaporte...)' ($bundleSrc -match 'Preparando pasaporte' -and $bundleSrc -match 'No se pudo cargar el catálogo')
+Check '94. el SW mantiene networkFirst para /api/stands (red primero)' ($swSrc -match 'networkFirst\(req, DATA_CACHE\)')
+
 # Cleanup: despublicar los stands creados en esta sección (misma corrida idempotente)
 foreach ($st in @($wA, $wB, $wC)) {
   if ($st.ok) {

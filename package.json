@@ -6,7 +6,7 @@
   "description": "Pasaporte digital para la muestra escolar del 28 de octubre. Cloudflare Workers + D1 (SQLite).",
   "scripts": {
     "dev": "wrangler dev",
-    "test": "node scripts/offline.test.mjs && pwsh -NoProfile -File scripts/smoke.ps1",
+    "test": "node scripts/offline.test.mjs && node scripts/catalog.test.mjs && pwsh -NoProfile -File scripts/smoke.ps1",
     "db:init": "wrangler d1 execute passport-db --local --file=migrations/0001_init.sql && wrangler d1 execute passport-db --local --file=migrations/0002_admin_config.sql && wrangler d1 execute passport-db --local --file=migrations/0003_admin_auth.sql && wrangler d1 execute passport-db --local --file=migrations/0004_stamps.sql && wrangler d1 execute passport-db --local --file=migrations/0005_secret_word.sql && wrangler d1 execute passport-db --local --file=migrations/0006_schedule_location_stamp_style.sql",
     "db:seed": "wrangler d1 execute passport-db --local --file=seed/seed.sql",
     "db:demo": "wrangler d1 execute passport-db --local --file=seed/seed-data.sql"

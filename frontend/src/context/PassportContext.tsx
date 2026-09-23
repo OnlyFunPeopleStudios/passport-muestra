@@ -1,6 +1,13 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { EventConfig, Stand, Visitor, Visit, VisitWithDetails, StampType } from '../types';
 import { DEFAULT_CONFIG } from '../data/seedData';
+import {
+  CatalogStatus,
+  CATALOG_UNAVAILABLE_ERROR,
+  hasWordInput,
+  loadCatalog,
+  resolveStand,
+} from './catalog';
 
 // ---------- utilidades ----------
 
@@ -13,6 +20,10 @@ const CREATED_KEY = 'pm_vt_created';
 
 // window.PMOffline lo expone public/offline.js (incluido como script estático).
 const off = () => (typeof window !== 'undefined' ? (window as any).PMOffline ?? null : null);
+
+// Tope de espera del catálogo en recordVisit: si en 10s sigue cargando, se
+// devuelve el error explícito de catálogo no disponible (no "código no reconocido").
+const CATALOG_WAIT_MS = 10000;
 
 const FRONT_STAMP_TYPE: Record<string, StampType> = {
   flag: 'bandera',
@@ -151,6 +162,8 @@ export interface AdminActionResult {
 interface PassportContextType {
   config: EventConfig;
   stands: Stand[];
+  catalogStatus: CatalogStatus;
+  catalogReady: boolean;
   visitors: Visitor[];
   visits: Visit[];
   currentVisitor: Visitor | null;
@@ -193,7 +206,21 @@ const readStoredVisitor = (): Visitor | null => {
 
 export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<EventConfig>(DEFAULT_CONFIG);
-  const [stands, setStands] = useState<Stand[]>([]);
+  const [stands, setStandsState] = useState<Stand[]>([]);
+  const standsRef = useRef<Stand[]>([]);
+  const [catalogStatus, setCatalogStatusState] = useState<CatalogStatus>('loading');
+  const catalogStatusRef = useRef<CatalogStatus>('loading');
+  // Wrapper de setStands que mantiene el ref al día: así recordVisit puede leer
+  // el catálogo actual aunque haya arrancado mientras todavía estaba cargando.
+  const setStands = (next: Stand[] | ((prev: Stand[]) => Stand[])) => {
+    const value = typeof next === 'function' ? next(standsRef.current) : next;
+    standsRef.current = value;
+    setStandsState(value);
+  };
+  const setCatalogStatus = (status: CatalogStatus) => {
+    catalogStatusRef.current = status;
+    setCatalogStatusState(status);
+  };
   const [currentVisitor, setCurrentVisitorState] = useState<Visitor | null>(readStoredVisitor);
   const [visitorVisits, setVisitorVisits] = useState<Visit[]>([]);
   const [adminVisits, setAdminVisits] = useState<Visit[]>([]);
@@ -202,13 +229,33 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // ---------- catálogo + config ----------
 
+  // Evita disparar refreshCatalog en paralelo (arranque + evento online + admin).
+  const catalogFetchingRef = useRef(false);
+
   const refreshCatalog = async () => {
-    const res = await fetch('/api/stands').catch(() => null);
-    if (res && res.ok) {
-      const raw = (await res.json()).stands || [];
-      setStands(raw.map(standFromApi));
-      // Espejo local crudo (shape del backend) para reconocer QR sin conexión.
-      off()?.saveStands(raw);
+    if (catalogFetchingRef.current) return;
+    catalogFetchingRef.current = true;
+    try {
+      // Red primero: la fuente principal cuando hay conexión. Si falla, IndexedDB
+      // como respaldo. Un catálogo fresco de red siempre reemplaza al local.
+      const result = await loadCatalog({
+        fetchStands: async () => {
+          const res = await fetch('/api/stands');
+          if (!res || !res.ok) throw new Error('HTTP ' + (res ? res.status : 0));
+          return (await res.json()).stands || [];
+        },
+        loadLocal: () => {
+          const store = off();
+          return store ? store.getStands().catch(() => []) : Promise.resolve([] as any[]);
+        },
+        saveLocal: async raw => {
+          await off()?.saveStands(raw);
+        },
+      });
+      setStands(result.stands.map(standFromApi));
+      setCatalogStatus(result.status);
+    } finally {
+      catalogFetchingRef.current = false;
     }
   };
 
@@ -362,19 +409,36 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         : currentVisitor;
     if (!target) return { success: false, error: 'Pasaporte no encontrado. Crea uno primero.' };
 
-    let stand: Stand | undefined;
-    let visitMethod: 'qr' | 'secret' = 'qr';
-    if (word !== undefined && word !== null && String(word).trim() !== '') {
-      const w = String(word).trim().toLowerCase();
-      stand = stands.find(s => s.is_published && s.secret_word && s.secret_word.trim().toLowerCase() === w);
-      if (!stand) return { success: false, error: 'La palabra secreta no coincide con ningún stand.' };
-      visitMethod = 'secret';
-    } else if (token) {
-      stand = stands.find(s => s.is_published && s.token === token);
-      if (!stand) return { success: false, error: 'Código QR no reconocido o stand inactivo.' };
-    } else {
+    if (!hasWordInput(word) && !(token && token.length > 0)) {
       return { success: false, error: 'Debe ingresar un código QR o palabra secreta.' };
     }
+
+    // QR y palabra comparten el mismo flujo seguro: si el catálogo todavía está
+    // cargando se espera (con tope); si quedó sin datos, error explícito de
+    // catálogo y NUNCA "Código QR no reconocido" por un catálogo aún vacío.
+    let outcome = resolveStand(catalogStatusRef.current, standsRef.current, { token, word });
+    if (outcome.state === 'pending') {
+      const deadline = Date.now() + CATALOG_WAIT_MS;
+      while (catalogStatusRef.current === 'loading' && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      outcome = resolveStand(catalogStatusRef.current, standsRef.current, { token, word });
+    }
+    if (outcome.state === 'pending' || outcome.state === 'unavailable') {
+      return { success: false, error: CATALOG_UNAVAILABLE_ERROR };
+    }
+    if (outcome.state === 'not-found') {
+      return {
+        success: false,
+        error:
+          outcome.method === 'secret'
+            ? 'La palabra secreta no coincide con ningún stand.'
+            : 'Código QR no reconocido o stand inactivo.',
+      };
+    }
+
+    const stand: Stand = outcome.stand;
+    const visitMethod: 'qr' | 'secret' = outcome.method;
 
     const existing =
       visitorVisits.find(v => v.stand_id === stand!.id) || (await off()?.getVisit(target.token, stand!.id).catch(() => null));
@@ -682,6 +746,17 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cuando vuelve la conexión, se refresca el catálogo: la red reemplaza el
+  // catálogo local (el fino control de concurrencia está en refreshCatalog).
+  useEffect(() => {
+    const onOnline = () => {
+      void refreshCatalog();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---------- valor del contexto ----------
 
   // El mismo vector data alimenta la vista visitante (espejo del pasaporte) y
@@ -711,6 +786,8 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         config,
         stands,
+        catalogStatus,
+        catalogReady: catalogStatus === 'ready',
         visitors: displayVisitors,
         visits: displayVisits,
         currentVisitor,

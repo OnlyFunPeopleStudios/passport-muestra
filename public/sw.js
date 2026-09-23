@@ -1,7 +1,8 @@
-// Passport Muestra - Service Worker del visitante (V0.6)
+// Passport Muestra - Service Worker del visitante (V0.7)
 // Cachea la app (shell), los stands y los sellos para que la app siga abriendo
 // sin conexión. Nunca cachea /api/admin ni sirve el panel offline.
-const VERSION = 'pm-v1';
+// pm-v2: invalida el cache pm-v1 que podía servir un catálogo de stands viejo.
+const VERSION = 'pm-v2';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

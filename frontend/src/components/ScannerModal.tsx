@@ -38,7 +38,7 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   initialTok,
   onInitialHandled,
 }) => {
-  const { stands, config, recordVisit } = usePassport();
+  const { stands, config, recordVisit, catalogStatus } = usePassport();
   const recordVisitRef = useRef(recordVisit);
   recordVisitRef.current = recordVisit;
 
@@ -69,14 +69,16 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
   };
 
   // Código heredado: ?tok= desde un QR ya impreso (#/scan?tok=...).
+  // No resuelve mientras el catálogo todavía carga: espera catalogReady y recién
+  // ahí intenta. Durante la espera se muestra "Preparando pasaporte…".
   useEffect(() => {
-    if (initialTok) void handleToken(initialTok);
+    if (initialTok && catalogStatus !== 'loading') void handleToken(initialTok);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialTok, catalogStatus]);
 
   // Cámara real (html5-qrcode) en la pestaña QR.
   useEffect(() => {
-    if (activeTab !== 'qr' || scanResult) return;
+    if (activeTab !== 'qr' || scanResult || (initialTok && catalogStatus === 'loading')) return;
     let cancelled = false;
     let scanner: any = null;
     setCameraError(null);
@@ -123,12 +125,11 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, scanResult]);
+  }, [activeTab, scanResult, catalogStatus]);
 
   const handleSecretSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!secretWord.trim()) return;
-
     const res = await recordVisit({ word: secretWord.trim() });
     setScanResult(res);
 
@@ -263,6 +264,16 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                 </button>
               </>
             )}
+          </div>
+        ) : initialTok && catalogStatus === 'loading' ? (
+          <div className="p-10 flex flex-col items-center text-center space-y-3 my-auto">
+            <div className="w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-950/60 border-2 border-indigo-500/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 animate-pulse">
+              <Sparkles className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-base font-bold">Preparando pasaporte…</h4>
+              <p className="text-xs text-slate-500">Cargando el catálogo de stands. Esperá un momento.</p>
+            </div>
           </div>
         ) : (
           <>

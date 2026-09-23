@@ -41,7 +41,7 @@ async function wordOwner(db, word, excludeId) {
 
 // ---------- Configuración del evento ----------
 
-const STAMP_STYLES = ['circular', 'redondo', 'estampilla', 'cuadrado'];
+const STAMP_STYLES = ['circular', 'redondo', 'estampilla', 'cuadrado', 'hexagonal', 'escudo'];
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const DATA_URL_RE = /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
 const LOGO_MAX = 300_000; // ~225 KB en base64
@@ -239,7 +239,8 @@ async function passport(db, visitorToken) {
   const { results: visits } = await db
     .prepare(
       `SELECT v.stand_id, v.rating, v.comment, v.created_at, v.visit_method,
-              s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image
+              s.name AS stand_name, s.course, s.flag, s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image,
+              s.schedule, s.location, s.stamp_style
        FROM visits v JOIN stands s ON s.id = v.stand_id
        WHERE v.visitor_id = ? ORDER BY v.id`
     )
@@ -261,7 +262,7 @@ async function standStats(db) {
       .prepare(
         `SELECT s.id, s.slug, s.name, s.course, s.description, s.area, s.flag, s.token,
                 s.stamp_icon, s.stamp_color, s.stamp_type, s.stamp_image, s.sort_order, s.is_published,
-                s.secret_word,
+                s.secret_word, s.schedule, s.location, s.stamp_style,
                 COALESCE(v.visits, 0) visits, COALESCE(v.evals, 0) evals,
                 v.avg_rating, COALESCE(v.comments, 0) comments
          FROM stands s
@@ -301,13 +302,28 @@ export default {
       }
     }
 
+    if (method === 'PATCH' && path === '/api/visitors') {
+      const body = await req.json().catch(() => ({}));
+      const name = sanitizeName(body.name);
+      const { meta } = await db
+        .prepare('UPDATE visitors SET name = ? WHERE token = ?')
+        .bind(name, String(body.vt ?? ''))
+        .run();
+      if (Number(meta.changes) === 0) return json({ error: 'pasaporte no encontrado' }, 404);
+      return json({ ok: true, visitor: { name } });
+    }
+
     if (method === 'GET' && path === '/api/stands') {
       // secret_word viaja en el catálogo porque la validación debe funcionar sin conexión.
       // No es un secreto real: la palabra está impresa en el stand y no es autenticación.
+      // Con sesión de admin se devuelven TODOS los stands (activos y ocultos) para que la
+      // grilla del Centro de Mando pueda reactivar los que están "apagados".
+      const isAdmin = await requireAdmin(req, db);
       const { results } = await db
         .prepare(
-          `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image
-           FROM stands WHERE is_published = 1 ORDER BY sort_order, id`
+          `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image,
+                  schedule, location, stamp_style, is_published
+           FROM stands${isAdmin ? '' : ' WHERE is_published = 1'} ORDER BY sort_order, id`
         )
         .all();
       return json({ stands: results });
@@ -432,6 +448,17 @@ const existing = await db
       return json({ error: 'no autorizado' }, 401);
     }
 
+    // Borrar todas las visitas/evaluaciones: pide la contraseña de admin como confirmación
+    // explícita además de la sesión (acción destructiva y no reversible).
+    if (method === 'POST' && path === '/api/admin/reset-visits') {
+      const b = await req.json().catch(() => ({}));
+      if (!(await verifyPassword(db, env, String(b.password ?? '')))) {
+        return json({ error: 'Contraseña incorrecta. No se eliminó nada.' }, 401);
+      }
+      const { meta } = await db.prepare('DELETE FROM visits').run();
+      return json({ ok: true, deleted: meta.changes });
+    }
+
     if (method === 'POST' && path === '/api/admin/password') {
       const b = await req.json().catch(() => ({}));
       if (!(await verifyPassword(db, env, String(b.current ?? '')))) {
@@ -486,8 +513,8 @@ const existing = await db
         .first();
       const { results: recent } = await db
         .prepare(
-          `SELECT v.rating, v.comment, v.created_at, v.is_hidden,
-                  s.name AS stand_name, s.flag AS stand_flag,
+          `SELECT v.id, v.visitor_id, v.stand_id, v.rating, v.comment, v.created_at, v.is_hidden,
+                  s.name AS stand_name, s.flag AS stand_flag, s.schedule, s.location, s.stamp_style,
                   COALESCE(vis.name, 'Anónimo') AS visitor_name
            FROM visits v JOIN stands s ON s.id = v.stand_id
            LEFT JOIN visitors vis ON vis.id = v.visitor_id
@@ -519,16 +546,17 @@ const existing = await db
       const secretWord = cleanText(b.secret_word, SECRET_WORD_MAX) || null;
       const dup = await wordOwner(db, secretWord, null);
       if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
+      const stampStyle = STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : 'circular';
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
           cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0,
-          secretWord
+          secretWord, cleanText(b.schedule, 120) || null, cleanText(b.location, 120) || null, stampStyle
         )
         .run();
       return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
@@ -556,10 +584,12 @@ const existing = await db
         const secretWord = has('secret_word') ? cleanText(b.secret_word, SECRET_WORD_MAX) || null : cur.secret_word ?? null;
         const dup = await wordOwner(db, secretWord, id);
         if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
+        const stampStyle = has('stamp_style') ? (STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : null) : (cur.stamp_style ?? null);
         await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
-                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ? WHERE id = ?`
+                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ?,
+                    schedule = ?, location = ?, stamp_style = ? WHERE id = ?`
           )
           .bind(
             name,
@@ -572,7 +602,10 @@ const existing = await db
             has('stamp_color') ? String(b.stamp_color ?? '') : cur.stamp_color ?? '',
             stampType, stampImage,
             has('sort_order') ? Number(b.sort_order) || 0 : cur.sort_order ?? 0,
-            secretWord, id
+            secretWord,
+            has('schedule') ? cleanText(b.schedule, 120) || null : cur.schedule ?? null,
+            has('location') ? cleanText(b.location, 120) || null : cur.location ?? null,
+            stampStyle, id
           )
           .run();
         return json({ ok: true });
@@ -592,7 +625,7 @@ const existing = await db
     if (method === 'GET' && path === '/api/admin/comments') {
       const { results } = await db
         .prepare(
-          `SELECT v.id, v.rating, v.comment, v.created_at, v.is_hidden, v.is_reviewed,
+          `SELECT v.id, v.visitor_id, v.stand_id, v.rating, v.comment, v.created_at, v.is_hidden, v.is_reviewed,
                   s.name AS stand_name, s.flag AS stand_flag,
                   COALESCE(vis.name, 'Anónimo') AS visitor_name
            FROM visits v JOIN stands s ON s.id = v.stand_id

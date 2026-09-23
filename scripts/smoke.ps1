@@ -473,12 +473,14 @@ $swSrc = if (Test-Path $swPath) { Get-Content $swPath -Raw } else { '' }
 $offSrc = if (Test-Path $offlinePath) { Get-Content $offlinePath -Raw } else { '' }
 $idxSrc = if (Test-Path $indexPath) { Get-Content $indexPath -Raw } else { '' }
 $appSrc = if (Test-Path $appPath) { Get-Content $appPath -Raw } else { '' }
+# Bundle de la app React (frontend/build) = la UI que se sirve realmente.
+$bundleSrc = (Get-ChildItem (Join-Path $pub 'assets') -Filter 'index-*.js' -File | Get-Content -Raw) -join "`n"
 
 Check '63. el SW precachea la app (app.js, offline.js, style.css)' ($swSrc -match "'app\.js'" -and $swSrc -match "'offline\.js'" -and $swSrc -match "'style\.css'")
 Check '64. el SW excluye /api/admin y /admin (panel nunca offline)' ($swSrc -match '/api/admin' -and $swSrc -match "'/admin'")
 Check '65. el SW no cachea el pasaporte del visitante (/api/passport)' ($swSrc -notmatch '/api/passport')
-Check '66. index.html carga offline.js antes de app.js' ($idxSrc -match 'offline\.js"[\s\S]*app\.js"')
-Check '67. app.js registra el service worker' ($appSrc -match 'serviceWorker\.register')
+Check '66. index.html carga el runtime offline (offline.js)' ($idxSrc -match '/offline\.js')
+Check '67. la app React registra el service worker' ($bundleSrc -match 'serviceWorker\.register')
 Check '68. offline.js guarda en IndexedDB y encola con operation_id' ($offSrc -match 'indexedDB\.open' -and $offSrc -match 'operation_id')
 Check '69. offline.js sincroniza reutilizando /api/visits y /api/evaluate' ($offSrc -match "'/api/visits'" -and $offSrc -match "'/api/evaluate'")
 Check '70. offline.js no toca endpoints admin' ($offSrc -notmatch '/api/admin')
@@ -599,9 +601,8 @@ $migPath = Join-Path $PSScriptRoot '..\migrations\0005_secret_word.sql'
 $migSrc = if (Test-Path $migPath) { Get-Content $migPath -Raw } else { '' }
 Check '89. migración 0005 agrega secret_word y visit_method (sin DROP/DELETE)' ($migSrc -match 'ALTER TABLE stands ADD COLUMN secret_word' -and $migSrc -match 'ALTER TABLE visits ADD COLUMN visit_method' -and -not ($migSrc -match '(?i)\b(drop|delete)\b'))
 
-# 90. UI: campo en el Centro de Mando + opción "palabra del stand" en la app
-$admSrcW = Get-Content (Join-Path $pub 'admin\app.js') -Raw
-Check '90. UI con campo Palabra secreta y ruta /word offline-capaz' ($admSrcW -match 'name="secret_word"' -and $admSrcW -match 'Permite registrar la visita sin escanear el QR' -and $appSrc -match "'/word':\s*renderWord" -and $offSrc -match 'visitByWordOffline' -and $offSrc -match 'matchStandByWord')
+# 90. UI: el Centro de Mando (React) edita la palabra secreta y la app offline es capaz por palabra
+Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -match 'secret_word' -and $offSrc -match 'visitByWordOffline' -and $offSrc -match 'matchStandByWord' -and $idxSrc -match 'offline\.js')
 
 # Cleanup: despublicar los stands creados en esta sección (misma corrida idempotente)
 foreach ($st in @($wA, $wB, $wC)) {

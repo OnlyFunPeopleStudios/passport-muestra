@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Indicador de conexión/sincronización que crea public/offline.js (PMOffline). */
+.conn-status {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 15;
+  max-width: 92vw;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #e7e0d0;
+  color: #6b7a86;
+  box-shadow: 0 2px 6px rgba(34, 48, 60, 0.12);
+  pointer-events: none;
+}
+.conn-status.conn-online { color: #2f7a4d; }
+.conn-status.conn-offline { color: #d64545; }
+.conn-status.conn-syncing { color: #0f4c81; }

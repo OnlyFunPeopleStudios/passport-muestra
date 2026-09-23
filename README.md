@@ -16,12 +16,13 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | V0.5 | 🟡 Deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar`; pruebas reales pendientes |
 | **V0.6** | ✅ Modo offline del visitante: service worker, catálogo de stands y visitas en el dispositivo, cola de sincronización idempotente |
 | **V0.7** | ✅ Palabra secreta del stand: vía alternativa al QR para registrar visitas, funciona online y offline, con `visit_method` (`qr`/`secret`) y CSV actualizado |
+| **V0.8** | ✅ UI del visitante y del Centro de Mando reescrita en **React + Vite + TypeScript** (código en `frontend/`, sirve desde `public/assets/` como build). Centro de Mando con toggle **Activo/Oculto** en la grilla y botón **Reiniciar visitas** (confirma contraseña) |
 
 ## Stack
 
 - **Cloudflare Workers** (JavaScript, sin dependencias de runtime) → API.
 - **Cloudflare D1** (SQLite) → base de datos. Anti-duplicado resuelto en la DB: `UNIQUE(visitor_id, stand_id)`.
-- **Static Assets** de Cloudflare → PWA del visitante (HTML/CSS/JS vanilla, sin framework).
+- **Static Assets** de Cloudflare → PWA: **React + Vite + TypeScript** (UI del visitante y del Centro de Mando en `frontend/`; se despliega como build en `public/assets/`).
 - QR: `html5-qrcode` (lectura con cámara, Apache-2.0) + `qrcode-generator` (generación/impresión, MIT). Banderas SVG: `flag-icons` (MIT). Detalle de licencias en `THIRD_PARTY.md`.
 
 Una sola pieza de servidor. Dev local con `wrangler dev`; el mismo código se despliega en Cloudflare sin reescribir nada.
@@ -32,7 +33,7 @@ Una sola pieza de servidor. Dev local con `wrangler dev`; el mismo código se de
 Celular (PWA) ──┐
                  ├─► Cloudflare Worker (/api/*) ──► D1 (SQLite)
 Notebook admin ─┘        │
-                         └─► static assets: index.html, app.js, style.css
+                         └─► static assets: index.html + public/assets/ (build React)
 ```
 
 El visitante recorre el circuito:
@@ -52,8 +53,9 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0005)
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0006)
 npm run db:seed    # carga 14 stands (13 países, con palabras secretas; Marruecos tiene 2 stands independientes)
+npm install --prefix frontend && npm run build --prefix frontend   # build React (deja assets en public/assets/)
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
 npm run dev        # sirve en http://localhost:8787
 ```
@@ -64,7 +66,7 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
-Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 90 chequeos).
+Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 109 chequeos).
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 
@@ -130,14 +132,14 @@ DB: D1 (SQLite). Migraciones en `migrations/`, seed en `seed/`.
 
 ```
 event_config (id=1: nombre, subtítulo, institución, descripción, logo, 6 colores, stamp_style, texts_json)
-stands    (id, slug, name, course, description, area, flag, is_published, token, stamp_icon, stamp_color, sort_order)
+stands    (id, slug, name, course, description, area, flag, is_published, token, secret_word, visit_method, schedule, location, stamp_style, stamp_icon, stamp_color, sort_order)
 visitors  (id, name, token)
 visits    (id, visitor_id, stand_id, rating, comment, is_hidden, is_reviewed, created_at)
           UNIQUE (visitor_id, stand_id)   ← anti-duplicados
 admin_auth (id=1: password_hash, salt, iterations, session_token, session_expires)   ← contraseña y sesión del panel
 ```
 
-Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
+Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). `secret_word` + `visit_method` (V0.7) agregan la vía de palabra secreta (`qr`/`secret`); `schedule`, `location` y `stamp_style` (migración 0006) agregan horario/lugar por stand y estilo de sello (sale de la config del evento). La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
 
 ### Crear / editar stands
 
@@ -157,7 +159,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso) |
 | GET | `/api/config` | Configuración pública del evento (identidad, colores, sellos, textos con fallback) |
 | GET | `/api/passport?vt=` | Pasaporte del visitante (sellos + progreso) |
-| POST | `/api/visits` | `{ vt, tok }` → sella el stand. 409 si ya fue visitado (devuelve la evaluación existente) |
+| POST | `/api/visits` | `{ vt, tok }` o `{ vt, word }` → sella el stand (por token QR o palabra secreta). 409 si ya fue visitado (devuelve la evaluación existente) |
 | POST | `/api/evaluate` | `{ vt, tok, rating, comment }` → evalúa un stand ya visitado. Valida: rating entero 1–5, comentario ≤200 caracteres, trim, filtro de lenguaje. 400/404 si los datos no son válidos |
 
 **Admin** (requieren sesión iniciada; cookie HttpOnly):
@@ -176,13 +178,17 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | POST | `/api/admin/comments/:id/hide` / `review` / `delete` | Ocultar / marcar revisado / borrar (conserva la valoración) |
 | GET | `/api/admin/visitors` | Visitantes con progreso |
 | GET | `/api/admin/export/visitas.csv` / `summary.csv` | Exportación CSV (UTF-8, abre en Excel) |
+| POST | `/api/admin/reset-visits` | `{ password }` → vacía `visits` tras confirmar la contraseña actual/password de arranque (mantiene stands, visitantes, config) |
 
 ## Deployment en Cloudflare
 
-> **Estado: desplegado y operativo.** El Worker `passport-muestra` sirve en **https://pasaporte.onlyfunpeople.com.ar** (custom domain declarado en `wrangler.jsonc` → `routes` con `custom_domain: true`). La D1 `passport-db` ya está creada y su `database_id` está cargado. Los pasos 1-2 solo hacen falta si se rehace desde cero.
+> **Estado: desplegado y operativo.** El Worker `passport-muestra` sirve la **UI React (V0.8)** en **https://pasaporte.onlyfunpeople.com.ar** (custom domain declarado en `wrangler.jsonc` → `routes` con `custom_domain: true`). La D1 `passport-db` ya está creada y su `database_id` está cargado. Los pasos 1-2 solo hacen falta si se rehace desde cero.
 >
-> **Migración 0005** agrega las columnas `secret_word` y `visit_method` (no destructiva). Para aplicar sobre la DB de producción existente:
+> **Migraciones aplicadas:** la 0005 agrega `secret_word`/`visit_method` y la **0006** agrega `schedule`/`location`/`stamp_style` (todas no destructivas). Para aplicar sobre la DB de producción existente:
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
+> `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
+>
+> **Antes de cada deploy:** `npm install --prefix frontend && npm run build --prefix frontend` (vaciar `public/assets/` primero para no acumular bundles viejos), luego `npx wrangler deploy`.
 
 1. `npx wrangler login`
 2. `npx wrangler d1 create passport-db` → copiar el `database_id` en `wrangler.jsonc`.
@@ -192,6 +198,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0003_admin_auth.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0004_stamps.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
 4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
 5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
 6. `npx wrangler deploy`
@@ -215,3 +222,5 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.5** 🟡 deploy en Cloudflare **operativo** en `pasaporte.onlyfunpeople.com.ar` (custom domain + HTTPS); pruebas reales en la feria pendientes.
 - **V0.6** ✅ modo offline del visitante: service worker + Cache API (app, stands, sellos), IndexedDB (catálogo, visitas y cola), sincronización idempotente al recuperar la conexión e indicador de estado. Sin endpoints nuevos: reutiliza `/api/visits` (409 = ya aplicado) y `/api/evaluate` (UPDATE idempotente).
 - **V0.7** ✅ palabra secreta del stand: vía alternativa al QR, `visit_method` (`qr`/`secret`), validación offline y online, PUT parcial del admin (no borra al activar/desactivar), CSV con columna `metodo`.
+- **V0.8** ✅ UI React + Vite + TypeScript (visitante y Centro de Mando), toggle Activo/Oculto en grilla, Reiniciar visitas con confirmación, `schedule`/`location`/`stamp_style` por stand. Desplegado en producción.
+- **Futuro** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) y banderas SVG.

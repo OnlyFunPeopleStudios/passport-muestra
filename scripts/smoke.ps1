@@ -623,6 +623,32 @@ foreach ($st in @($wA, $wB, $wC)) {
   }
 }
 
+# ---------- V0.9 (Material para la Muestra: QR GENERAL + afiche A4) ----------
+Write-Host ""
+Write-Host "== V0.9 (Material para la Muestra) ==" -ForegroundColor Cyan
+
+# 98. El Centro de Mando (React) expone la sección y genera la URL GENERAL
+Check '98. el bundle incluye la sección Material para la Muestra' ($bundleSrc -match 'Material para la Muestra' -and $bundleSrc -match 'material-muestra-print-area')
+
+# 99. La URL GENERAL es exactamente la de producción (sin token de stand)
+Check '99. el bundle usa la URL GENERAL de producción' ($bundleSrc -match 'https://pasaporte\.onlyfunpeople\.com\.ar')
+
+# 100. El afiche no es genérico: branding + textos clave presentes en el bundle
+Check '100. el afiche usa MI PASAPORTE / ESCANEÁ PARA COMENZAR / branding' ($bundleSrc -match 'MI PASAPORTE' -and $bundleSrc -match 'ESCANE' -and $bundleSrc -match 'recorré')
+
+# 101. El QR GENERAL no lleva token: la URL del bundle no tiene ?tok= de stands
+$qgTokFree = ($bundleSrc -match 'https://pasaporte\.onlyfunpeople\.com\.ar') -and -not ($bundleSrc -match 'pasaporte\.onlyfunpeople\.com\.ar[^"]*\?tok=')
+Check '101. la URL GENERAL en el bundle no arrastra token de stand' $qgTokFree
+
+# 102. /api/stands se mantiene intacto (misma cantidad, sin regenerar tokens)
+$standsFinal = Invoke-Api GET '/api/stands' $null -Cookie ''
+Check '102. /api/stands sigue exponiendo la misma cantidad de stands' ($standsFinal.ok -and $standsFinal.data.stands.Count -eq 14 -and $standsFinal.data.stands[0].token -eq $tok1)
+
+# 103. El QR GENERAL no toca stands ni visitas: solo LECTURA (el bundle no escribe)
+$matSrc = if (Test-Path (Join-Path $PSScriptRoot '..\frontend\src\utils\generalQr.ts')) { Get-Content (Join-Path $PSScriptRoot '..\frontend\src\utils\generalQr.ts') -Raw } else { '' }
+$posSrc = if (Test-Path (Join-Path $PSScriptRoot '..\frontend\src\utils\poster.ts')) { Get-Content (Join-Path $PSScriptRoot '..\frontend\src\utils\poster.ts') -Raw } else { '' }
+Check '103. generalQr.ts y poster.ts son solo lectura (sin /api ni fetch)' (($matSrc -notmatch '/api/') -and ($matSrc -notmatch 'fetch\(') -and ($posSrc -notmatch '/api/') -and ($posSrc -notmatch 'fetch\('))
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

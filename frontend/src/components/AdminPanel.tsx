@@ -5,6 +5,7 @@ import { FlagIcon, FLAGS } from '../data/flags';
 import { StampBadge } from './StampBadge';
 import { StampCreatorStudio } from './StampCreatorStudio';
 import { QRPosterModal } from './QRPosterModal';
+import { MaterialMuestraView } from './MaterialMuestraView';
 import { StandStatsPanel } from './StandStatsPanel';
 import { COLOR_PRESETS } from '../data/seedData';
 import {
@@ -74,7 +75,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
   } = usePassport();
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'stats' | 'creator' | 'stands' | 'posters' | 'branding' | 'comments' | 'visitors' | 'settings'
+    'dashboard' | 'stats' | 'creator' | 'stands' | 'posters' | 'material' | 'branding' | 'comments' | 'visitors' | 'settings'
   >('dashboard');
 
   // Login form state
@@ -497,6 +498,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
           { id: 'creator', label: '🎨 Creador de Sellos', icon: Sparkles },
           { id: 'stands', label: `🏫 Stands (${stands.length})`, icon: Store },
           { id: 'posters', label: '🖨️ Carteles QR & Palabras', icon: QrCode },
+          { id: 'material', label: '📦 Material para la Muestra', icon: FileDown },
           { id: 'branding', label: '🎨 Diseño y marca', icon: Palette },
           { id: 'comments', label: `💬 Comentarios (${commentsList.length})`, icon: MessageSquare },
           { id: 'visitors', label: `🧑‍🎓 Visitantes (${visitors.length})`, icon: Users },
@@ -608,6 +610,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
             ))}
           </div>
         </div>
+      )}
+
+      {/* TAB: MATERIAL PARA LA MUESTRA (QR GENERAL + AFICHE A4) */}
+      {activeTab === 'material' && (
+        <MaterialMuestraView config={config} />
       )}
 
       {/* TAB: DASHBOARD */}

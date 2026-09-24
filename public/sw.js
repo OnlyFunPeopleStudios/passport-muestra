@@ -4,21 +4,19 @@
 // pm-v2: invalida el cache pm-v1 que podía servir un catálogo de stands viejo.
 // pm-v3: invalida el cache pm-v2 (shell/bundle viejos que quedaron en celulares)
 // y obliga a re-descargar la app actual con el catálogo resilient.
-const VERSION = 'pm-v3';
+// pm-v4: invalida el cache pm-v3 (se eliminaron la interfaz admin estática legacy
+// /admin y los assets de la app vanilla vieja: app.js, style.css, stamp-renderer.js,
+// qrcode-generator.js, manifest, icon.svg). El shell ahora son solo los archivos
+// que la app React actual usa.
+const VERSION = 'pm-v4';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 
 const SHELL = [
   '',
   'index.html',
-  'style.css',
-  'app.js',
   'offline.js',
-  'stamp-renderer.js',
-  'manifest.webmanifest',
-  'icon.svg',
   'vendor/html5-qrcode.min.js',
-  'vendor/qrcode-generator.js',
 ].map(url);
 
 // Datos públicos que el visitante necesita sin conexión (nunca datos de otros).

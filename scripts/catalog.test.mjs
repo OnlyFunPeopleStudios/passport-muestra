@@ -158,7 +158,7 @@ const oculto = { id: 3, slug: 'oculto', name: 'Oculto', token: 'tok-oculto-zzz99
 // I. Service Worker cambia de versión (invalida el cache viejo del catálogo)
 {
   const sw = readFileSync(join(here, '..', 'public', 'sw.js'), 'utf8');
-  check('I1. SW usa pm-v3 (invalida pm-v2 y pm-v1)', /const VERSION = 'pm-v3'/.test(sw));
+  check('I1. SW usa pm-v4 (invalida pm-v3 y anteriores)', /const VERSION = 'pm-v4'/.test(sw));
   check('I2. el activate borra caches que no arrancan con la versión actual', /keys\.filter/.test(sw) && /!k\.startsWith\(VERSION\)/.test(sw));
 }
 

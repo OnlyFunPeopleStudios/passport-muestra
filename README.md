@@ -23,7 +23,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 - **Cloudflare Workers** (JavaScript, sin dependencias de runtime) → API.
 - **Cloudflare D1** (SQLite) → base de datos. Anti-duplicado resuelto en la DB: `UNIQUE(visitor_id, stand_id)`.
 - **Static Assets** de Cloudflare → PWA: **React + Vite + TypeScript** (UI del visitante y del Centro de Mando en `frontend/`; se despliega como build en `public/assets/`).
-- QR: `html5-qrcode` (lectura con cámara, Apache-2.0) + `qrcode-generator` (generación/impresión, MIT). Banderas SVG: `flag-icons` (MIT). Detalle de licencias en `THIRD_PARTY.md`.
+- QR: `html5-qrcode` (lectura con cámara, Apache-2.0) + `qrcode` (node-qrcode, generación/impresión en la UI React, MIT). Banderas SVG: `flag-icons` (MIT). Detalle de licencias en `THIRD_PARTY.md`.
 
 Una sola pieza de servidor. Dev local con `wrangler dev`; el mismo código se despliega en Cloudflare sin reescribir nada.
 
@@ -208,7 +208,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 ## Assets y licencias
 
 - **`html5-qrcode`** v2.3.8 (lector QR con cámara, incluye ZXing) — **Apache-2.0**. Vendor en `public/vendor/`, licencia en `LICENSE.html5-qrcode`.
-- **`qrcode-generator`** (generación de QR) — MIT. Vendor en `public/vendor/`, licencia en `LICENSE.qrcode-generator`.
+- **`qrcode`** v1.5.4 (node-qrcode, generación de QR del Centro de Mando: QR de stands y QR GENERAL) — **MIT**. Dependencia npm de `frontend/`.
 - **Banderas**: **`flag-icons`** v7.5.0 (https://github.com/lipis/flag-icons, MIT, © Panayiotis Lipiridis). Los SVG usados están en `public/stamps/`; la licencia MIT exige conservar el aviso de copyright, incluido en `THIRD_PARTY.md`.
 - Icono de la app: propio.
 - **Patrones reutilizados** de proyectos open source auditados (como *referencia conceptual*, sin copiar código): `bsides-passport-pwa` (estructura pasaporte/QR/admin), `nxsummit-game` (patrón `UNIQUE` anti-duplicado), `DomesticTouristPassport` (flujo visita+valoración+comentario), `kiosk-guestbook` (moderación/exportación), `holoquest` (token→hash). Proyecto nuevo e independiente desde cero.

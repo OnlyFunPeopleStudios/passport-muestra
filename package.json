@@ -12,7 +12,6 @@
     "db:demo": "wrangler d1 execute passport-db --local --file=seed/seed-data.sql"
   },
   "devDependencies": {
-    "html5-qrcode": "^2.3.8",
-    "qrcode-generator": "^1.4.4"
+    "html5-qrcode": "^2.3.8"
   }
 }

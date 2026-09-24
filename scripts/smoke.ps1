@@ -466,17 +466,15 @@ $pub = Join-Path $PSScriptRoot '..\public'
 $swPath = Join-Path $pub 'sw.js'
 $offlinePath = Join-Path $pub 'offline.js'
 $indexPath = Join-Path $pub 'index.html'
-$appPath = Join-Path $pub 'app.js'
 
 Check '62. service worker presente (public/sw.js)' (Test-Path $swPath)
 $swSrc = if (Test-Path $swPath) { Get-Content $swPath -Raw } else { '' }
 $offSrc = if (Test-Path $offlinePath) { Get-Content $offlinePath -Raw } else { '' }
 $idxSrc = if (Test-Path $indexPath) { Get-Content $indexPath -Raw } else { '' }
-$appSrc = if (Test-Path $appPath) { Get-Content $appPath -Raw } else { '' }
 # Bundle de la app React (frontend/build) = la UI que se sirve realmente.
 $bundleSrc = (Get-ChildItem (Join-Path $pub 'assets') -Filter 'index-*.js' -File | Get-Content -Raw) -join "`n"
 
-Check '63. el SW precachea la app (app.js, offline.js, style.css)' ($swSrc -match "'app\.js'" -and $swSrc -match "'offline\.js'" -and $swSrc -match "'style\.css'")
+Check '63. el SW precachea el shell actual (index.html, offline.js, html5-qrcode)' ($swSrc -match "'index\.html'" -and $swSrc -match "'offline\.js'" -and $swSrc -match "html5-qrcode\.min\.js" -and $swSrc -notmatch "'app\.js'" -and $swSrc -notmatch "'style\.css'")
 Check '64. el SW excluye /api/admin y /admin (panel nunca offline)' ($swSrc -match '/api/admin' -and $swSrc -match "'/admin'")
 Check '65. el SW no cachea el pasaporte del visitante (/api/passport)' ($swSrc -notmatch '/api/passport')
 Check '66. index.html carga el runtime offline (offline.js)' ($idxSrc -match '/offline\.js')
@@ -604,17 +602,17 @@ Check '89. migración 0005 agrega secret_word y visit_method (sin DROP/DELETE)' 
 # 90. UI: el Centro de Mando (React) edita la palabra secreta y la app offline es capaz por palabra
 Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -match 'secret_word' -and $offSrc -match 'visitByWordOffline' -and $offSrc -match 'matchStandByWord' -and $idxSrc -match 'offline\.js')
 
-# 91-97. Fix del catálogo visitante: SW v3 invalida los caches viejos y la UI
+# 91-97. Fix del catálogo visitante: SW v4 invalida los caches viejos y la UI
 # espera catalogReady antes de resolver (QR y palabra comparten el mismo flujo
 # seguro). Además los errores distinguen el ORIGEN: catálogo no disponible /
 # datos del dispositivo desactualizados / código no reconocido real.
-Check '91. SW pm-v3 invalida el cache pm-v2 y pm-v1 del catálogo' ($swSrc -match "VERSION = 'pm-v3'")
+Check '91. SW pm-v4 invalida el cache pm-v3 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v4'")
 Check '92. activate elimina caches que no arrancan con la versión actual' ($swSrc -match '!k\.startsWith\(VERSION\)' -and $swSrc -match 'keys\.filter')
 Check '93. la app React espera el catálogo antes de resolver (Preparando pasaporte...)' ($bundleSrc -match 'Preparando pasaporte' -and $bundleSrc -match 'No se pudo cargar el catálogo')
 Check '94. el SW mantiene networkFirst para /api/stands (red primero)' ($swSrc -match 'networkFirst\(req, DATA_CACHE\)')
 Check '95. el bundle distingue "Catálogo no disponible" (no todo es "código no reconocido")' ($bundleSrc -match 'Catálogo no disponible' -and $bundleSrc -match 'Código no reconocido' -and $bundleSrc -match 'Datos desactualizados')
 Check '96. offline.js marca la frescura del catálogo local (catalog_saved_at)' ($offSrc -match 'catalog_saved_at' -and $offSrc -match 'getCatalogMeta')
-Check '97. el registro del SW usa updateViaCache none (detecta pm-v3 al arrancar)' ($bundleSrc -match 'updateViaCache')
+Check '97. el registro del SW usa updateViaCache none (detecta la versión al arrancar)' ($bundleSrc -match 'updateViaCache')
 
 # Cleanup: despublicar los stands creados en esta sección (misma corrida idempotente)
 foreach ($st in @($wA, $wB, $wC)) {
@@ -648,6 +646,42 @@ Check '102. /api/stands sigue exponiendo la misma cantidad de stands' ($standsFi
 $matSrc = if (Test-Path (Join-Path $PSScriptRoot '..\frontend\src\utils\generalQr.ts')) { Get-Content (Join-Path $PSScriptRoot '..\frontend\src\utils\generalQr.ts') -Raw } else { '' }
 $posSrc = if (Test-Path (Join-Path $PSScriptRoot '..\frontend\src\utils\poster.ts')) { Get-Content (Join-Path $PSScriptRoot '..\frontend\src\utils\poster.ts') -Raw } else { '' }
 Check '103. generalQr.ts y poster.ts son solo lectura (sin /api ni fetch)' (($matSrc -notmatch '/api/') -and ($matSrc -notmatch 'fetch\(') -and ($posSrc -notmatch '/api/') -and ($posSrc -notmatch 'fetch\('))
+
+# ---------- V1.0: interfaz administrativa antigua eliminada (seguridad) ----------
+Write-Host ""
+Write-Host "== V1.0 (admin legacy eliminado) ==" -ForegroundColor Cyan
+
+# 104-109. /admin y todas sus variantes responden 404 (ni UI vieja ni SPA)
+$a1 = Get-Raw '/admin'
+$a2 = Get-Raw '/admin/'
+$a3 = Get-Raw '/admin?x=1'
+$a4 = Get-Raw '/admin/anything'
+$a5 = Get-Raw '/admin/index.html'
+Check '104. GET /admin -> 404 (sin UI vieja)' (-not $a1.ok -and $a1.status -eq 404)
+Check '105. GET /admin/ -> 404' (-not $a2.ok -and $a2.status -eq 404)
+Check '106. GET /admin?x=1 -> 404 (query no elude la ruta)' (-not $a3.ok -and $a3.status -eq 404)
+Check '107. GET /admin/anything -> 404' (-not $a4.ok -and $a4.status -eq 404)
+Check '108. GET /admin/index.html -> 404 (archivo eliminado)' (-not $a5.ok -and $a5.status -eq 404)
+
+# 109. Los assets estáticos del admin viejo ya no se sirven
+$sa = Get-Raw '/admin/app.js'
+$ss = Get-Raw '/admin/style.css'
+Check '109. assets del admin viejo (/admin/app.js|style.css) -> 404' ($sa.status -eq 404 -and $ss.status -eq 404)
+
+# 110. La app actual (SPA) y la API pública siguen intactas
+$root = Get-Raw '/'
+$cfgAlive = Get-Raw '/api/config'
+Check '110. GET / -> 200 (SPA actual, no la UI vieja)' ($root.ok -and $root.status -eq 200 -and $root.raw -match 'Pasaporte de la Muestra' -and $root.raw -notmatch 'Centro de Mando')
+Check '111. /api/config sigue respondiendo -> 200' ($cfgAlive.ok -and $cfgAlive.status -eq 200)
+
+# 112-114. Sin referencias legacy en código, worker, SW ni bundle
+$workerChk = Get-Content (Join-Path $PSScriptRoot '..\src\worker.js') -Raw
+Check '112. worker.js ya no referencia /admin/index.html' ($workerChk -notmatch '/admin/index\.html')
+Check '113. public/admin/ eliminado del disco' (-not (Test-Path (Join-Path $PSScriptRoot '..\public\admin')))
+# 114. El SHELL del SW solo precachea los archivos actuales (nada del admin/legacy)
+$shellBlock = [regex]::Match($swSrc, "const SHELL = \[.*?\];", [System.Text.RegularExpressions.RegexOptions]::Singleline).Value
+Check '114. el SW solo precachea el shell actual (sin app.js, style.css, stamp-renderer, qrcode-generator)' ($shellBlock -notmatch 'stamp-renderer' -and $shellBlock -notmatch 'qrcode-generator' -and $shellBlock -notmatch "'app\.js'" -and $shellBlock -notmatch "'style\.css'" -and $shellBlock -match 'offline\.js' -and $shellBlock -match 'html5-qrcode')
+Check '115. el bundle SPA no referencia /admin (no queda UI vieja ligada)' ($bundleSrc -notmatch '"/admin' -and $idxSrc -notmatch '/admin')
 
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })

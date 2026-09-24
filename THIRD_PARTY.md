@@ -22,14 +22,6 @@ permisivas y compatibles con el uso previsto (incluido el comercial).
 - Se conserva el aviso de copyright de ZXing; la licencia Apache-2.0 aplicable
   es la misma que la de `html5-qrcode` (`public/vendor/LICENSE.html5-qrcode`).
 
-### qrcode-generator — MIT License
-
-- Versión: 1.5.2
-- Uso: generación de QR (páginas `#/qr` y descargas del Centro de Mando).
-- Archivo: `public/vendor/qrcode-generator.js`
-- Licencia: MIT. Copia en `public/vendor/LICENSE.qrcode-generator`.
-- Copyright: © 2009 Kazuhiko Arase (https://github.com/kazuhikoarase/qrcode-generator).
-
 ### flag-icons — MIT License
 
 - Versión: 7.5.0

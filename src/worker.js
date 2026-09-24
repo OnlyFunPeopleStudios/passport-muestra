@@ -710,9 +710,13 @@ const existing = await db
       return csvResponse(rows, 'resumen.csv');
     }
 
-    // ---- admin UI ----
-    if (method === 'GET' && (path === '/admin' || path === '/admin/')) {
-      return env.ASSETS.fetch(new Request(new URL('/admin/index.html', req.url), req));
+    // ---- admin UI (legacy eliminada) ----
+    // Limpieza de seguridad: la interfaz administrativa antigua (public/admin/) fue
+    // retirada. Toda ruta /admin y /admin/* responde 404 para que ningún visitante
+    // que adivine la URL llegue a la UI vieja ni a una variante del SPA.
+    // La única administración disponible es el Centro de Mando (React) de la app.
+    if (path === '/admin' || path.startsWith('/admin/')) {
+      return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
 
     return env.ASSETS.fetch(req);

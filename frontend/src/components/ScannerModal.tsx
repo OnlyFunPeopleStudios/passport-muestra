@@ -258,7 +258,10 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
                         ? 'Catálogo no disponible'
                         : scanResult.errorTitle === 'Datos desactualizados'
                           ? 'Datos desactualizados'
-                          : 'Código no reconocido'}
+                          : scanResult.errorTitle === 'Pasaporte no encontrado' ||
+                              scanResult.error === 'pasaporte no encontrado'
+                            ? 'Pasaporte no encontrado'
+                            : 'Código no reconocido'}
                   </h4>
                   <p className="text-xs text-slate-500">
                     {scanResult.error || 'La palabra secreta ingresada no coincide con ningún stand de la muestra.'}

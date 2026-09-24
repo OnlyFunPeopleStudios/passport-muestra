@@ -419,7 +419,14 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       visitorToken && isAdmin
         ? adminVisitors.find(v => v.token === visitorToken) || currentVisitor
         : currentVisitor;
-    if (!target) return { success: false, error: 'Pasaporte no encontrado. Crea uno primero.' };
+    if (!target)
+      return {
+        success: false,
+        errorTitle: 'Pasaporte no encontrado',
+        // El error del backend para vt inexistente dice 'pasaporte no encontrado':
+        // el guard del frontend refleja el mismo problema con el mismo título.
+        error: 'Este teléfono no tiene un pasaporte activo. Crea tu pasaporte primero y volvé a intentar.',
+      };
 
     if (!hasWordInput(word) && !(token && token.length > 0)) {
       return { success: false, error: 'Debe ingresar un código QR o palabra secreta.' };

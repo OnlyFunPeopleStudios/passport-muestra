@@ -6,6 +6,18 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 const text = (data, headers = { 'content-type': 'text/plain; charset=utf-8' }) => new Response(data, { headers });
 
+// Assets de la app vanilla vieja (visitante + admin estático) que fueron eliminados.
+// Se bloquean con 404 explícito para que el fallback SPA de Assets no los "resuelva".
+const LEGACY_STATIC = [
+  '/app.js',
+  '/style.css',
+  '/stamp-renderer.js',
+  '/manifest.webmanifest',
+  '/icon.svg',
+  '/vendor/qrcode-generator.js',
+  '/vendor/LICENSE.qrcode-generator',
+];
+
 const COMMENT_MAX = 200;
 // Filtro básico de lenguaje inapropiado (censura simple, no IA).
 const BAD_WORDS =
@@ -716,6 +728,13 @@ const existing = await db
     // que adivine la URL llegue a la UI vieja ni a una variante del SPA.
     // La única administración disponible es el Centro de Mando (React) de la app.
     if (path === '/admin' || path.startsWith('/admin/')) {
+      return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
+
+    // ---- assets legacy de la app vanilla vieja (eliminada) ----
+    // No deben resolverse a nada (ni siquiera al fallback SPA de Assets), para que
+    // no quede ningún rastro de la versión antigua en producción.
+    if (LEGACY_STATIC.includes(path)) {
       return new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
 

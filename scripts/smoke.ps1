@@ -683,6 +683,14 @@ $shellBlock = [regex]::Match($swSrc, "const SHELL = \[.*?\];", [System.Text.Regu
 Check '114. el SW solo precachea el shell actual (sin app.js, style.css, stamp-renderer, qrcode-generator)' ($shellBlock -notmatch 'stamp-renderer' -and $shellBlock -notmatch 'qrcode-generator' -and $shellBlock -notmatch "'app\.js'" -and $shellBlock -notmatch "'style\.css'" -and $shellBlock -match 'offline\.js' -and $shellBlock -match 'html5-qrcode')
 Check '115. el bundle SPA no referencia /admin (no queda UI vieja ligada)' ($bundleSrc -notmatch '"/admin' -and $idxSrc -notmatch '/admin')
 
+# 116-117. Los assets legacy de la app vanilla vieja no deben "resolverse" ni al SPA;
+# el único vendor que el SPA actual usa (html5-qrcode) sí debe servirse.
+$l1 = Get-Raw '/app.js'; $l2 = Get-Raw '/style.css'; $l3 = Get-Raw '/stamp-renderer.js'
+$l4 = Get-Raw '/manifest.webmanifest'; $l5 = Get-Raw '/vendor/qrcode-generator.js'
+Check '116. assets legacy de la app vieja (/app.js, /style.css, /stamp-renderer.js, manifest, qrcode-generator) -> 404' ($l1.status -eq 404 -and $l2.status -eq 404 -and $l3.status -eq 404 -and $l4.status -eq 404 -and $l5.status -eq 404)
+$hq = Get-Raw '/vendor/html5-qrcode.min.js'
+Check '117. vendor usado por el SPA (html5-qrcode.min.js) -> 200' ($hq.ok -and $hq.status -eq 200)
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

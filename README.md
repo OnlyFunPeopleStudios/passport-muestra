@@ -69,7 +69,7 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
-Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 142 chequeos).
+Corre primero las pruebas puras en Node (`scripts/*.test.mjs`: lógica offline, catálogo, QR/afiche y mapeo Stand↔API, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 142 chequeos).
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 

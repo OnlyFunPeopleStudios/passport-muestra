@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { EventConfig, Stand, Visitor, Visit, VisitWithDetails, StampType } from '../types';
+import { EventConfig, Stand, Visitor, Visit, VisitWithDetails } from '../types';
 import { DEFAULT_CONFIG } from '../data/seedData';
 import {
   CatalogSource,
@@ -10,6 +10,7 @@ import {
   loadCatalog,
   resolveStand,
 } from './catalog';
+import { standFromApi, standToApi } from '../utils/standApi';
 
 // ---------- utilidades ----------
 
@@ -26,64 +27,6 @@ const off = () => (typeof window !== 'undefined' ? (window as any).PMOffline ?? 
 // Tope de espera del catálogo en recordVisit: si en 10s sigue cargando, se
 // devuelve el error explícito de catálogo no disponible (no "código no reconocido").
 const CATALOG_WAIT_MS = 10000;
-
-const FRONT_STAMP_TYPE: Record<string, StampType> = {
-  flag: 'bandera',
-  icon: 'icono',
-  image: 'imagen',
-  color: 'color',
-};
-const BACK_STAMP_TYPE: Record<string, string> = {
-  bandera: 'flag',
-  icono: 'icon',
-  imagen: 'image',
-  color: 'color',
-};
-
-function standFromApi(s: any): Stand {
-  return {
-    id: s.id,
-    slug: s.slug ?? '',
-    name: s.name,
-    course: s.course ?? '',
-    description: s.description ?? '',
-    area: s.area ?? '',
-    flag: s.flag ?? 'ar',
-    token: s.token,
-    secret_word: String(s.secret_word ?? ''),
-    schedule: s.schedule || undefined,
-    location: s.location || undefined,
-    stamp_type: s.stamp_type ? (FRONT_STAMP_TYPE[s.stamp_type] ?? 'bandera') : 'bandera',
-    stamp_icon: s.stamp_icon || '',
-    stamp_color: s.stamp_color || '',
-    stamp_image: s.stamp_image || '',
-    stamp_style: s.stamp_style || undefined,
-    flyer_url: s.flyer_url || undefined,
-    flyer_image: s.flyer_image || undefined,
-    has_flyer_image: !!s.has_flyer_image || !!s.flyer_image,
-    sort_order: Number(s.sort_order) || 0,
-    is_published: !!s.is_published,
-  };
-}
-
-function standToApi(s: Partial<Stand>) {
-  return {
-    name: s.name,
-    course: s.course,
-    description: s.description,
-    area: s.area,
-    flag: s.flag,
-    is_published: s.is_published,
-    stamp_icon: s.stamp_icon,
-    stamp_color: s.stamp_color,
-    stamp_image: s.stamp_image,
-    stamp_type: s.stamp_type ? (BACK_STAMP_TYPE[s.stamp_type] ?? 'flag') : 'flag',
-    sort_order: s.sort_order,
-    secret_word: s.secret_word,
-    flyer_url: s.flyer_url,
-    flyer_image: s.flyer_image,
-  };
-}
 
 function visitFromServer(visitorId: number | string, v: any): Visit {
   const out: any = {

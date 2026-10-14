@@ -28,7 +28,8 @@ const check = (name, cond) => {
 // Si standToApi no manda uno de estos, el cambio se pierde al recargar.
 const EDITABLE = ['name', 'course', 'description', 'area', 'flag', 'is_published',
   'stamp_icon', 'stamp_color', 'stamp_image', 'stamp_type', 'stamp_style',
-  'schedule', 'location', 'sort_order', 'secret_word', 'flyer_url', 'flyer_image'];
+  'schedule', 'location', 'sort_order', 'secret_word', 'flyer_url', 'flyer_image',
+  'topic', 'activities', 'highlight', 'fun_facts', 'invite_text'];
 
 // ---- 1. Bug de regresión: schedule/location/stamp_style viajan al API ----
 const edited = {

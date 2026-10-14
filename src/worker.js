@@ -351,6 +351,7 @@ export default {
           // /api/stands/:id/flyer para no inflar la carga inicial de los visitantes.
           `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image,
                   schedule, location, stamp_style, is_published, flyer_url,${isAdmin ? ' flyer_image,' : ''}
+                  topic, activities, highlight, fun_facts, invite_text,
                   (flyer_image IS NOT NULL AND flyer_image != '') AS has_flyer_image
            FROM stands${isAdmin ? '' : ' WHERE is_published = 1'} ORDER BY sort_order, id`
         )
@@ -610,15 +611,18 @@ const existing = await db
       const stampStyle = STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : 'circular';
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style, flyer_url, flyer_image)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style, flyer_url, flyer_image, topic, activities, highlight, fun_facts, invite_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
           cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0,
           secretWord, cleanText(b.schedule, 120) || null, cleanText(b.location, 120) || null, stampStyle,
-          flyerUrl, flyerImage
+          flyerUrl, flyerImage,
+          cleanText(b.topic, 80) || null, cleanText(b.activities, 400) || null,
+          cleanText(b.highlight, 300) || null, cleanText(b.fun_facts, 800) || null,
+          cleanText(b.invite_text, 300) || null
         )
         .run();
       return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
@@ -653,7 +657,8 @@ const existing = await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
                     is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ?,
-                    schedule = ?, location = ?, stamp_style = ?, flyer_url = ?, flyer_image = ? WHERE id = ?`
+                    schedule = ?, location = ?, stamp_style = ?, flyer_url = ?, flyer_image = ?,
+                    topic = ?, activities = ?, highlight = ?, fun_facts = ?, invite_text = ? WHERE id = ?`
           )
           .bind(
             name,
@@ -669,7 +674,13 @@ const existing = await db
             secretWord,
             has('schedule') ? cleanText(b.schedule, 120) || null : cur.schedule ?? null,
             has('location') ? cleanText(b.location, 120) || null : cur.location ?? null,
-            stampStyle, flyerUrl, flyerImage, id
+            stampStyle, flyerUrl, flyerImage,
+            has('topic') ? cleanText(b.topic, 80) || null : cur.topic ?? null,
+            has('activities') ? cleanText(b.activities, 400) || null : cur.activities ?? null,
+            has('highlight') ? cleanText(b.highlight, 300) || null : cur.highlight ?? null,
+            has('fun_facts') ? cleanText(b.fun_facts, 800) || null : cur.fun_facts ?? null,
+            has('invite_text') ? cleanText(b.invite_text, 300) || null : cur.invite_text ?? null,
+            id
           )
           .run();
         return json({ ok: true });

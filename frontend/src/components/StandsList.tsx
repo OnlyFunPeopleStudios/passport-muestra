@@ -12,6 +12,9 @@ import {
   Sparkles,
   ChevronRight,
   ExternalLink,
+  BookOpen,
+  Compass,
+  Lightbulb,
   X,
 } from 'lucide-react';
 
@@ -27,7 +30,7 @@ export const StandsList: React.FC<StandsListProps> = ({
   const { stands, visits, currentVisitor, config } = usePassport();
   const [search, setSearch] = useState('');
   const [selectedArea, setSelectedArea] = useState<string>('all');
-  const [flyerStand, setFlyerStand] = useState<Stand | null>(null);
+  const [fichaStand, setFichaStand] = useState<Stand | null>(null);
 
   const publishedStands = stands.filter(s => s.is_published);
   const areas = Array.from(new Set(publishedStands.map(s => s.area)));
@@ -36,11 +39,16 @@ export const StandsList: React.FC<StandsListProps> = ({
   const visitsMap = new Map(visitorVisits.map(v => [v.stand_id, v]));
 
   const filteredStands = publishedStands.filter(s => {
+    const q = search.toLowerCase();
     const matchesSearch =
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.course.toLowerCase().includes(search.toLowerCase()) ||
-      s.description.toLowerCase().includes(search.toLowerCase()) ||
-      (s.location && s.location.toLowerCase().includes(search.toLowerCase()));
+      s.name.toLowerCase().includes(q) ||
+      s.course.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q) ||
+      (s.location || '').toLowerCase().includes(q) ||
+      (s.topic || '').toLowerCase().includes(q) ||
+      (s.activities || '').toLowerCase().includes(q) ||
+      (s.highlight || '').toLowerCase().includes(q) ||
+      (s.fun_facts || '').toLowerCase().includes(q);
     const matchesArea = selectedArea === 'all' || s.area === selectedArea;
     return matchesSearch && matchesArea;
   });
@@ -170,15 +178,13 @@ export const StandsList: React.FC<StandsListProps> = ({
                   )}
                 </div>
 
-                {(stand.flyer_url || stand.has_flyer_image) && (
-                  <button
-                    onClick={() => setFlyerStand(stand)}
-                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-fuchsia-50 dark:bg-fuchsia-950/40 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-950/60 text-fuchsia-700 dark:text-fuchsia-300 text-xs font-bold rounded-xl border border-fuchsia-300/50 dark:border-fuchsia-800/50 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Ver flyer del stand
-                  </button>
-                )}
+                <button
+                  onClick={() => setFichaStand(stand)}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-fuchsia-50 dark:bg-fuchsia-950/40 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-950/60 text-fuchsia-700 dark:text-fuchsia-300 text-xs font-bold rounded-xl border border-fuchsia-300/50 dark:border-fuchsia-800/50 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Ver ficha del stand
+                </button>
               </div>
 
               {/* Bottom Actions */}
@@ -210,27 +216,38 @@ export const StandsList: React.FC<StandsListProps> = ({
         })}
       </div>
 
-      {/* Modal del flyer del stand */}
-      {flyerStand && (
+      {/* Modal de la ficha completa del stand */}
+      {fichaStand && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
-          onClick={() => setFlyerStand(null)}
+          onClick={() => setFichaStand(null)}
         >
           <div
             className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 dark:border-slate-800"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900 z-10">
-              <div>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                  {flyerStand.name}
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  {flyerStand.course} · {flyerStand.area}
-                </p>
+              <div className="flex items-start gap-3">
+                {fichaStand.stamp_image ? (
+                  <div className="w-11 h-11 rounded-xl overflow-hidden shadow-sm border border-slate-300 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800">
+                    <img src={fichaStand.stamp_image} alt={fichaStand.name} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <FlagIcon flag={fichaStand.flag} className="w-11 h-8 shrink-0 shadow-sm" />
+                )}
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                    {fichaStand.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {fichaStand.course}
+                    {fichaStand.area ? ` · ${fichaStand.area}` : ''}
+                    {fichaStand.topic ? ` · ${fichaStand.topic}` : ''}
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setFlyerStand(null)}
+                onClick={() => setFichaStand(null)}
                 aria-label="Cerrar"
                 className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 shrink-0"
               >
@@ -238,25 +255,128 @@ export const StandsList: React.FC<StandsListProps> = ({
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
-              {flyerStand.has_flyer_image && (
-                <img
-                  src={`/api/stands/${flyerStand.id}/flyer`}
-                  alt={`Flyer de ${flyerStand.name}`}
-                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800"
-                />
+            <div className="p-4 space-y-4">
+              {fichaStand.invite_text && (
+                <p className="text-sm font-semibold italic text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 border-l-4 border-indigo-500 rounded-r-xl px-3 py-2 leading-relaxed">
+                  “{fichaStand.invite_text}”
+                </p>
               )}
-              {flyerStand.flyer_url && (
-                <a
-                  href={flyerStand.flyer_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Abrir link del flyer
-                </a>
+
+              {fichaStand.description && (
+                <section className="space-y-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5" />
+                    Sobre el stand
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {fichaStand.description}
+                  </p>
+                </section>
               )}
+
+              {fichaStand.activities && (
+                <section className="space-y-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5" />
+                    ¿Qué vas a encontrar?
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {fichaStand.activities}
+                  </p>
+                </section>
+              )}
+
+              {fichaStand.highlight && (
+                <section className="space-y-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <Star className="w-3.5 h-3.5" />
+                    No te lo pierdas
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {fichaStand.highlight}
+                  </p>
+                </section>
+              )}
+
+              {fichaStand.fun_facts && (
+                <section className="space-y-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    ¿Sabías que…?
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                    {fichaStand.fun_facts}
+                  </p>
+                </section>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="flex items-center gap-1 font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md border border-indigo-200/60 dark:border-indigo-800/40">
+                  <Clock className="w-3 h-3" />
+                  {fichaStand.schedule || '09:00 - 17:30 hs'}
+                </span>
+                {fichaStand.location && (
+                  <span className="flex items-center gap-1 font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md">
+                    <MapPin className="w-3 h-3 text-rose-500" />
+                    {fichaStand.location}
+                  </span>
+                )}
+              </div>
+
+              {(fichaStand.has_flyer_image || fichaStand.flyer_url) && (
+                <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Material del stand
+                  </h4>
+                  {fichaStand.has_flyer_image && (
+                    <img
+                      src={`/api/stands/${fichaStand.id}/flyer`}
+                      alt={`Material de ${fichaStand.name}`}
+                      className="w-full rounded-2xl border border-slate-200 dark:border-slate-800"
+                    />
+                  )}
+                  {fichaStand.flyer_url && (
+                    <a
+                      href={fichaStand.flyer_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Abrir link del material
+                    </a>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end border-t border-slate-200 dark:border-slate-800 pt-3">
+                {visitsMap.get(fichaStand.id) ? (
+                  <button
+                    onClick={() => {
+                      onOpenEvaluation(fichaStand);
+                      setFichaStand(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-bold rounded-xl transition border border-amber-500/30"
+                  >
+                    <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                    {visitsMap.get(fichaStand.id)?.rating
+                      ? `Calificado: ${visitsMap.get(fichaStand.id)?.rating} ⭐`
+                      : 'Dejar calificación ⭐'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      onOpenScanner();
+                      setFichaStand(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-semibold rounded-xl transition shadow"
+                  >
+                    <QrCode className="w-3.5 h-3.5 text-indigo-200" />
+                    Sellar stand
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

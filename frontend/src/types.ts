@@ -50,6 +50,11 @@ export interface Stand {
   secret_word: string;
   schedule?: string;      // e.g. "10:00 - 11:30 hs"
   location?: string;      // e.g. "Patio Central - Stand #4"
+  topic?: string;         // tema principal del stand (e.g. "Cultura Colombiana")
+  activities?: string;    // qué va a encontrar o hacer el visitante
+  highlight?: string;     // dato/lugar/personaje más importante del país
+  fun_facts?: string;     // datos curiosos
+  invite_text?: string;   // frase corta de invitación al stand
   stamp_type?: StampType;
   stamp_icon?: string;
   stamp_color?: string;

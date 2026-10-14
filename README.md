@@ -20,6 +20,7 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | **V0.9** | ✅ Material para la Muestra: QR GENERAL y afiche A4 imprimible desde el Centro de Mando (solo lectura, sin tokens de stand) |
 | **V1.0** | ✅ Seguridad: eliminada la interfaz administrativa antigua; `/admin` y los assets legacy responden **404** (queda solo el Centro de Mando React) |
 | **V1.1** | ✅ Flyer / material por stand: el admin carga un **link** o una **imagen** por stand y el visitante lo abre con el botón **«Ver flyer»** desde el catálogo |
+| **V1.2** | ✅ Ficha del stand: tema, qué va a encontrar el visitante, dato destacado, datos curiosos y frase de invitación (migración 0008). El visitante ve todo junto en **«Ver ficha del stand»**, con el flyer adentro |
 
 ## Stack
 
@@ -56,7 +57,7 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0007)
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0008)
 npm run db:seed    # carga 14 stands (13 países, con palabras secretas; Marruecos tiene 2 stands independientes)
 npm install --prefix frontend && npm run build --prefix frontend   # build React (deja assets en public/assets/)
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
@@ -69,7 +70,7 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
-Corre primero las pruebas puras en Node (`scripts/*.test.mjs`: lógica offline, catálogo, QR/afiche y mapeo Stand↔API, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 142 chequeos).
+Corre primero las pruebas puras en Node (`scripts/*.test.mjs`: lógica offline, catálogo, QR/afiche y mapeo Stand↔API, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 147 chequeos).
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 
@@ -142,7 +143,7 @@ visits    (id, visitor_id, stand_id, rating, comment, is_hidden, is_reviewed, cr
 admin_auth (id=1: password_hash, salt, iterations, session_token, session_expires)   ← contraseña y sesión del panel
 ```
 
-Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). `secret_word` + `visit_method` (V0.7) agregan la vía de palabra secreta (`qr`/`secret`); `schedule`, `location` y `stamp_style` (migración 0006) agregan horario/lugar por stand y estilo de sello (sale de la config del evento); `flyer_url` y `flyer_image` (migración 0007) agregan el flyer/material por stand. La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
+Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). `secret_word` + `visit_method` (V0.7) agregan la vía de palabra secreta (`qr`/`secret`); `schedule`, `location` y `stamp_style` (migración 0006) agregan horario/lugar por stand y estilo de sello (sale de la config del evento); `flyer_url` y `flyer_image` (migración 0007) agregan el flyer/material por stand; `topic`, `activities`, `highlight`, `fun_facts` e `invite_text` (migración 0008) agregan la ficha ampliada que el visitante ve en **«Ver ficha del stand»**. La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
 
 ### Crear / editar stands
 
@@ -159,7 +160,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | Método | Ruta | Descripción |
 |---|---|---|
 | POST | `/api/visitors` | Crea visitante `{ name? }` → `{ visitor }` (token del pasaporte) |
-| GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso). Incluye `flyer_url` y `has_flyer_image`; el base64 del flyer **solo** viaja con sesión de admin |
+| GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso). Incluye `flyer_url`, `has_flyer_image` y la ficha (`topic`/`activities`/`highlight`/`fun_facts`/`invite_text`); el base64 del flyer **solo** viaja con sesión de admin |
 | GET | `/api/stands/:id/flyer` | Sirve la imagen del flyer del stand (dataURL → bytes, con content-type real). 404 si el stand no tiene imagen o no está publicado |
 | GET | `/api/config` | Configuración pública del evento (identidad, colores, sellos, textos con fallback) |
 | GET | `/api/passport?vt=` | Pasaporte del visitante (sellos + progreso) |
@@ -189,10 +190,11 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 
 > **Estado: desplegado y operativo.** El Worker `passport-muestra` sirve la **UI React (V0.8)** en **https://pasaporte.onlyfunpeople.com.ar** (custom domain declarado en `wrangler.jsonc` → `routes` con `custom_domain: true`). La D1 `passport-db` ya está creada y su `database_id` está cargado. Los pasos 1-2 solo hacen falta si se rehace desde cero.
 >
-> **Migraciones aplicadas:** la 0005 agrega `secret_word`/`visit_method` y la **0006** agrega `schedule`/`location`/`stamp_style` (todas no destructivas). Para aplicar sobre la DB de producción existente:
+> **Migraciones aplicadas:** la 0005 agrega `secret_word`/`visit_method`, la **0006** agrega `schedule`/`location`/`stamp_style`, la 0007 agrega `flyer_url`/`flyer_image` y la **0008** agrega la ficha ampliada (`topic`/`activities`/`highlight`/`fun_facts`/`invite_text`) — todas no destructivas. Para aplicar sobre la DB de producción existente:
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0007_flyer.sql`
+> `npx wrangler d1 execute passport-db --remote --file=migrations/0008_stand_details.sql`
 >
 > **Antes de cada deploy:** `npm install --prefix frontend && npm run build --prefix frontend` (vaciar `public/assets/` primero para no acumular bundles viejos), luego `npx wrangler deploy`.
 
@@ -206,6 +208,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0007_flyer.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0008_stand_details.sql`
 4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
 5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
 6. `npx wrangler deploy`
@@ -233,4 +236,5 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.9** ✅ Material para la Muestra: QR GENERAL (URL del evento, sin tokens de stand) y afiche A4 imprimible, generados en el navegador sobre utilidades puras y de solo lectura.
 - **V1.0** ✅ Seguridad: se eliminó la interfaz administrativa antigua y sus assets; `/admin` (y variantes) y los legacy responden 404; SW `pm-v4` invalida cachés viejos.
 - **V1.1** ✅ Flyer / material por stand: `flyer_url` + `flyer_image` (migración 0007). El admin los carga desde el Centro de Mando; el visitante ve el botón **«Ver flyer»** con modal (imagen servida on-demand en `/api/stands/:id/flyer`, con validación de esquema `http(s)`) y/o link en pestaña nueva.
+- **V1.2** ✅ Ficha del stand (migración 0008): `topic`, `activities`, `highlight`, `fun_facts` e `invite_text`. El admin los carga en el mismo formulario; el visitante ve todo junto en el modal **«Ver ficha del stand»**, con el flyer/link adentro y el botón de sellar/evaluar.
 - **Futuro** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) y banderas SVG.

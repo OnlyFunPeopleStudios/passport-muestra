@@ -101,6 +101,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     is_published: boolean;
     flyer_url: string;
     flyer_image?: string;
+    topic: string;
+    activities: string;
+    highlight: string;
+    fun_facts: string;
+    invite_text: string;
   }>({
     slug: '',
     name: '',
@@ -118,6 +123,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     is_published: true,
     flyer_url: '',
     flyer_image: undefined,
+    topic: '',
+    activities: '',
+    highlight: '',
+    fun_facts: '',
+    invite_text: '',
   });
 
   // Password change state
@@ -362,6 +372,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
       is_published: stand.is_published,
       flyer_url: stand.flyer_url || '',
       flyer_image: stand.flyer_image,
+      topic: stand.topic || '',
+      activities: stand.activities || '',
+      highlight: stand.highlight || '',
+      fun_facts: stand.fun_facts || '',
+      invite_text: stand.invite_text || '',
     });
   };
 
@@ -1044,13 +1059,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
                 </div>
               </div>
 
+              {/* Ficha ampliada del stand (lo que ve el visitante en «Ver ficha del stand») */}
+              <div className="space-y-3 border-t border-slate-200 dark:border-slate-800 pt-3">
+                <div>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Ficha del stand (la ve el visitante)
+                  </label>
+                  <p className="text-[11px] text-slate-400">
+                    Todo opcional. Se muestra en el botón «Ver ficha del stand» del catálogo.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Tema principal
+                  </label>
+                  <input
+                    type="text"
+                    value={standFormData.topic}
+                    onChange={e => setStandFormData({ ...standFormData, topic: e.target.value })}
+                    placeholder="Ej: Cultura Colombiana"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    ¿Qué va a encontrar o hacer el visitante?
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={standFormData.activities}
+                    onChange={e => setStandFormData({ ...standFormData, activities: e.target.value })}
+                    placeholder="Ej: un stand colorido, con música y juegos para compartir."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Dato, lugar o personaje más importante
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={standFormData.highlight}
+                    onChange={e => setStandFormData({ ...standFormData, highlight: e.target.value })}
+                    placeholder="Ej: el café y la música."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Datos curiosos
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={standFormData.fun_facts}
+                    onChange={e => setStandFormData({ ...standFormData, fun_facts: e.target.value })}
+                    placeholder="Ej: en Colombia, «un tinto» es un café solo, no vino."
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Frase de invitación
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={standFormData.invite_text}
+                    onChange={e => setStandFormData({ ...standFormData, invite_text: e.target.value })}
+                    placeholder="Ej: ¡Ven a vivir el ritmo y el sabor de Colombia!"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                  />
+                </div>
+              </div>
+
               {/* Flyer / material del stand (opcional) */}
               <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
                 <label className="font-semibold text-slate-700 dark:text-slate-300">
                   Flyer / material del stand (opcional)
                 </label>
                 <p className="text-[11px] text-slate-400 -mt-1">
-                  Pegá un link (Drive, Canva, YouTube…) o subí una imagen. Los visitantes lo verán con el botón «Ver flyer» en el catálogo.
+                  Pegá un link (Drive, Canva, YouTube…) o subí una imagen. Los visitantes lo ven dentro de la ficha del stand («Ver ficha del stand»).
                 </p>
                 <input
                   type="url"

@@ -729,8 +729,44 @@ $keep = Invoke-Api PUT "/api/admin/stands/$fsId" @{ name = 'Stand con Flyer'; fl
 $keepRow = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $fsId } | Select-Object -First 1
 Check '123. re-guardar solo el link lo persiste (sin borrar la imagen ya limpiada)' ($keep.ok -and $keepRow.flyer_url -eq 'https://example.com/v2.pdf' -and $keepRow.has_flyer_image -eq 0)
 
+# ---------- V1.2: ficha ampliada del stand (lo que cargan los profes) ----------
+Write-Host ""
+Write-Host "== V1.2 (ficha del stand) ==" -ForegroundColor Cyan
+
+# 124. Crear stand con los 5 campos de la ficha y verlos en el catalogo publico.
+$fic = Invoke-Api POST '/api/admin/stands' @{
+  name = 'Stand con Ficha'
+  topic = 'Cultura Colombiana'
+  activities = 'Un stand colorido con musica y juegos.'
+  highlight = 'El cafe y la musica.'
+  fun_facts = 'En Colombia, un tinto es un cafe solo, no vino.'
+  invite_text = 'Ven a vivir el ritmo y el sabor de Colombia!'
+}
+Check '124. crear stand con ficha (topic/activities/highlight/fun_facts/invite_text) -> 201' ($fic.ok -and $fic.status -eq 201)
+$ficId = $fic.data.stand.id
+
+# 125. El catalogo publico devuelve los 5 campos (es la ficha que ve el visitante).
+$ficRow = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $ficId } | Select-Object -First 1
+Check '125. catalogo publico expone los 5 campos de la ficha' ($null -ne $ficRow -and $ficRow.topic -eq 'Cultura Colombiana' -and $ficRow.activities -eq 'Un stand colorido con musica y juegos.' -and $ficRow.highlight -eq 'El cafe y la musica.' -and $ficRow.fun_facts -eq 'En Colombia, un tinto es un cafe solo, no vino.' -and $ficRow.invite_text -eq 'Ven a vivir el ritmo y el sabor de Colombia!')
+
+# 126. Edicion parcial: cambiar solo el tema no borra el resto de la ficha.
+$fic2 = Invoke-Api PUT "/api/admin/stands/$ficId" @{ name = 'Stand con Ficha'; topic = 'Cultura y cafe' }
+$ficRow2 = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $ficId } | Select-Object -First 1
+Check '126. editar el tema no borra los demas campos de la ficha' ($fic2.ok -and $ficRow2.topic -eq 'Cultura y cafe' -and $ficRow2.fun_facts -eq 'En Colombia, un tinto es un cafe solo, no vino.')
+
+# 127. Limpiar un campo con cadena vacia lo borra (queda null).
+$fic3 = Invoke-Api PUT "/api/admin/stands/$ficId" @{ name = 'Stand con Ficha'; invite_text = '' }
+$ficRow3 = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $ficId } | Select-Object -First 1
+Check '127. frase de invitacion vacia limpia el campo (null)' ($fic3.ok -and $null -eq $ficRow3.invite_text)
+
+# 128. Los textos se recortan al maximo permitido (topic 80) para no inflar la carga.
+$longTopic = 'x' * 200
+$fic4 = Invoke-Api PUT "/api/admin/stands/$ficId" @{ name = 'Stand con Ficha'; topic = $longTopic }
+$ficRow4 = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $ficId } | Select-Object -First 1
+Check '128. topic se recorta a 80 caracteres' ($fic4.ok -and $ficRow4.topic.Length -eq 80)
+
 # Cleanup: despublicar los stands creados (corrida idempotente, igual que V0.4).
-foreach ($st in @($fs, $badFs)) {
+foreach ($st in @($fs, $badFs, $fic)) {
   if ($st.ok) {
     Invoke-Api PUT "/api/admin/stands/$($st.data.stand.id)" @{ name = $st.data.stand.name; is_published = $false } | Out-Null
   }

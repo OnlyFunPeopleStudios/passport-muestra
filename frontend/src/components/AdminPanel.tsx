@@ -99,6 +99,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     stamp_type?: 'bandera' | 'icono' | 'color' | 'imagen';
     sort_order: number;
     is_published: boolean;
+    flyer_url: string;
+    flyer_image?: string;
   }>({
     slug: '',
     name: '',
@@ -114,6 +116,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     stamp_type: 'bandera',
     sort_order: stands.length + 1,
     is_published: true,
+    flyer_url: '',
+    flyer_image: undefined,
   });
 
   // Password change state
@@ -174,6 +178,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
   const [draftConfig, setDraftConfig] = useState<EventConfig>(config);
   const [configSaved, setConfigSaved] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const flyerInputRef = useRef<HTMLInputElement>(null);
 
   // Custom Palettes state
   interface CustomPaletteItem {
@@ -265,6 +270,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     reader.readAsDataURL(file);
   };
 
+  // Imagen del flyer: se comprime en el cliente hasta quedar por debajo del tope
+  // del servidor (~300 KB en base64) para que la subida nunca sea rechazada.
+  const handleFlyerUpload = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1000;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) { height = Math.round((height * maxDim) / width); width = maxDim; }
+        } else {
+          if (height > maxDim) { width = Math.round((width * maxDim) / height); height = maxDim; }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        let quality = 0.82;
+        let out = canvas.toDataURL('image/jpeg', quality);
+        while (out.length > 300000 && quality > 0.4) {
+          quality -= 0.12;
+          out = canvas.toDataURL('image/jpeg', quality);
+        }
+        setStandFormData(prev => ({ ...prev, flyer_image: out }));
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveCustomPalette = () => {
     const name = customPaletteName.trim() || `Mi Paleta #${customPalettes.length + 1}`;
     const newPalette: CustomPaletteItem = {
@@ -321,6 +360,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
       stamp_type: stand.stamp_type,
       sort_order: stand.sort_order,
       is_published: stand.is_published,
+      flyer_url: stand.flyer_url || '',
+      flyer_image: stand.flyer_image,
     });
   };
 
@@ -1000,6 +1041,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
                     placeholder="Breve reseña del proyecto..."
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
                   />
+                </div>
+              </div>
+
+              {/* Flyer / material del stand (opcional) */}
+              <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">
+                  Flyer / material del stand (opcional)
+                </label>
+                <p className="text-[11px] text-slate-400 -mt-1">
+                  Pegá un link (Drive, Canva, YouTube…) o subí una imagen. Los visitantes lo verán con el botón «Ver flyer» en el catálogo.
+                </p>
+                <input
+                  type="url"
+                  value={standFormData.flyer_url}
+                  onChange={e => setStandFormData({ ...standFormData, flyer_url: e.target.value })}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={flyerInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) handleFlyerUpload(e.target.files[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => flyerInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl font-semibold cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    {standFormData.flyer_image ? 'Cambiar imagen' : 'Subir imagen'}
+                  </button>
+                  {standFormData.flyer_image && (
+                    <>
+                      <img
+                        src={standFormData.flyer_image}
+                        alt="Vista previa del flyer"
+                        className="w-10 h-10 rounded-lg object-cover border border-slate-300 dark:border-slate-700"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setStandFormData({ ...standFormData, flyer_image: '' })}
+                        className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold cursor-pointer"
+                      >
+                        Quitar
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

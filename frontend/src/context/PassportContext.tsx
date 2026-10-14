@@ -58,6 +58,9 @@ function standFromApi(s: any): Stand {
     stamp_color: s.stamp_color || '',
     stamp_image: s.stamp_image || '',
     stamp_style: s.stamp_style || undefined,
+    flyer_url: s.flyer_url || undefined,
+    flyer_image: s.flyer_image || undefined,
+    has_flyer_image: !!s.has_flyer_image || !!s.flyer_image,
     sort_order: Number(s.sort_order) || 0,
     is_published: !!s.is_published,
   };
@@ -77,6 +80,8 @@ function standToApi(s: Partial<Stand>) {
     stamp_type: s.stamp_type ? (BACK_STAMP_TYPE[s.stamp_type] ?? 'flag') : 'flag',
     sort_order: s.sort_order,
     secret_word: s.secret_word,
+    flyer_url: s.flyer_url,
+    flyer_image: s.flyer_image,
   };
 }
 

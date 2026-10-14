@@ -17,6 +17,9 @@ Mismo motor, distinto evento: cambiá la configuración y tenés un pasaporte nu
 | **V0.6** | ✅ Modo offline del visitante: service worker, catálogo de stands y visitas en el dispositivo, cola de sincronización idempotente |
 | **V0.7** | ✅ Palabra secreta del stand: vía alternativa al QR para registrar visitas, funciona online y offline, con `visit_method` (`qr`/`secret`) y CSV actualizado |
 | **V0.8** | ✅ UI del visitante y del Centro de Mando reescrita en **React + Vite + TypeScript** (código en `frontend/`, sirve desde `public/assets/` como build). Centro de Mando con toggle **Activo/Oculto** en la grilla y botón **Reiniciar visitas** (confirma contraseña) |
+| **V0.9** | ✅ Material para la Muestra: QR GENERAL y afiche A4 imprimible desde el Centro de Mando (solo lectura, sin tokens de stand) |
+| **V1.0** | ✅ Seguridad: eliminada la interfaz administrativa antigua; `/admin` y los assets legacy responden **404** (queda solo el Centro de Mando React) |
+| **V1.1** | ✅ Flyer / material por stand: el admin carga un **link** o una **imagen** por stand y el visitante lo abre con el botón **«Ver flyer»** desde el catálogo |
 
 ## Stack
 
@@ -53,7 +56,7 @@ Los QR de los stands codifican la URL del propio sitio con el *token* del stand 
 
 ```bash
 npm install
-npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0006)
+npm run db:init    # crea el esquema en la DB local (migraciones 0001 a 0007)
 npm run db:seed    # carga 14 stands (13 países, con palabras secretas; Marruecos tiene 2 stands independientes)
 npm install --prefix frontend && npm run build --prefix frontend   # build React (deja assets en public/assets/)
 npm run db:demo    # opcional: 8 visitantes y ~30 evaluaciones de ejemplo (para el Centro de Mando)
@@ -66,7 +69,7 @@ Probar el loop completo (API), incluidos los casos de duplicados, validaciones y
 npm test
 ```
 
-Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 109 chequeos).
+Corre primero las pruebas de la lógica offline (`scripts/offline.test.mjs`, sin navegador) y después el smoke completo contra el servidor local (`scripts/smoke.ps1`, 142 chequeos).
 
 Para probar con el celular en la misma red, arrancar con `npx wrangler dev --ip 0.0.0.0` y entrar desde el teléfono a `http://<ip-pc>:8787`. **La cámara solo funciona sobre HTTPS o localhost** (el navegador lo exige); en la feria ya estará el dominio final con HTTPS.
 
@@ -139,7 +142,7 @@ visits    (id, visitor_id, stand_id, rating, comment, is_hidden, is_reviewed, cr
 admin_auth (id=1: password_hash, salt, iterations, session_token, session_expires)   ← contraseña y sesión del panel
 ```
 
-Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). `secret_word` + `visit_method` (V0.7) agregan la vía de palabra secreta (`qr`/`secret`); `schedule`, `location` y `stamp_style` (migración 0006) agregan horario/lugar por stand y estilo de sello (sale de la config del evento). La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
+Los textos personalizables viven en `texts_json` (el API siempre completa los que falten con el texto por defecto). `secret_word` + `visit_method` (V0.7) agregan la vía de palabra secreta (`qr`/`secret`); `schedule`, `location` y `stamp_style` (migración 0006) agregan horario/lugar por stand y estilo de sello (sale de la config del evento); `flyer_url` y `flyer_image` (migración 0007) agregan el flyer/material por stand. La columna `flag` guarda el **código ISO 3166-1 alpha-2** (ej. `ar`); el front lo muestra como emoji por ahora, y en V0.4 se cambiará a SVG sin tocar la DB.
 
 ### Crear / editar stands
 
@@ -156,7 +159,8 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 | Método | Ruta | Descripción |
 |---|---|---|
 | POST | `/api/visitors` | Crea visitante `{ name? }` → `{ visitor }` (token del pasaporte) |
-| GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso) |
+| GET | `/api/stands` | Lista stands publicados (incluye token: tan público como el QR impreso). Incluye `flyer_url` y `has_flyer_image`; el base64 del flyer **solo** viaja con sesión de admin |
+| GET | `/api/stands/:id/flyer` | Sirve la imagen del flyer del stand (dataURL → bytes, con content-type real). 404 si el stand no tiene imagen o no está publicado |
 | GET | `/api/config` | Configuración pública del evento (identidad, colores, sellos, textos con fallback) |
 | GET | `/api/passport?vt=` | Pasaporte del visitante (sellos + progreso) |
 | POST | `/api/visits` | `{ vt, tok }` o `{ vt, word }` → sella el stand (por token QR o palabra secreta). 409 si ya fue visitado (devuelve la evaluación existente) |
@@ -188,6 +192,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 > **Migraciones aplicadas:** la 0005 agrega `secret_word`/`visit_method` y la **0006** agrega `schedule`/`location`/`stamp_style` (todas no destructivas). Para aplicar sobre la DB de producción existente:
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
 > `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
+> `npx wrangler d1 execute passport-db --remote --file=migrations/0007_flyer.sql`
 >
 > **Antes de cada deploy:** `npm install --prefix frontend && npm run build --prefix frontend` (vaciar `public/assets/` primero para no acumular bundles viejos), luego `npx wrangler deploy`.
 
@@ -200,6 +205,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0004_stamps.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0005_secret_word.sql`
    - `npx wrangler d1 execute passport-db --remote --file=migrations/0006_schedule_location_stamp_style.sql`
+   - `npx wrangler d1 execute passport-db --remote --file=migrations/0007_flyer.sql`
 4. `npx wrangler d1 execute passport-db --remote --file=seed/seed.sql`
 5. `npx wrangler secret put ADMIN_PASSWORD` (clave de arranque/recuperación; nunca va en el repo).
 6. `npx wrangler deploy`
@@ -224,4 +230,7 @@ Después regenerar el QR desde el Centro de Mando o **🖨️ QR**.
 - **V0.6** ✅ modo offline del visitante: service worker + Cache API (app, stands, sellos), IndexedDB (catálogo, visitas y cola), sincronización idempotente al recuperar la conexión e indicador de estado. Sin endpoints nuevos: reutiliza `/api/visits` (409 = ya aplicado) y `/api/evaluate` (UPDATE idempotente).
 - **V0.7** ✅ palabra secreta del stand: vía alternativa al QR, `visit_method` (`qr`/`secret`), validación offline y online, PUT parcial del admin (no borra al activar/desactivar), CSV con columna `metodo`.
 - **V0.8** ✅ UI React + Vite + TypeScript (visitante y Centro de Mando), toggle Activo/Oculto en grilla, Reiniciar visitas con confirmación, `schedule`/`location`/`stamp_style` por stand. Desplegado en producción.
+- **V0.9** ✅ Material para la Muestra: QR GENERAL (URL del evento, sin tokens de stand) y afiche A4 imprimible, generados en el navegador sobre utilidades puras y de solo lectura.
+- **V1.0** ✅ Seguridad: se eliminó la interfaz administrativa antigua y sus assets; `/admin` (y variantes) y los legacy responden 404; SW `pm-v4` invalida cachés viejos.
+- **V1.1** ✅ Flyer / material por stand: `flyer_url` + `flyer_image` (migración 0007). El admin los carga desde el Centro de Mando; el visitante ve el botón **«Ver flyer»** con modal (imagen servida on-demand en `/api/stands/:id/flyer`, con validación de esquema `http(s)`) y/o link en pestaña nueva.
 - **Futuro** ⏳ exportación Excel (hojas: visitantes, visitas, evaluaciones, resumen por stand, resumen general) y banderas SVG.

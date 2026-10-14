@@ -57,6 +57,18 @@ const STAMP_STYLES = ['circular', 'redondo', 'estampilla', 'cuadrado', 'hexagona
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const DATA_URL_RE = /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
 const LOGO_MAX = 300_000; // ~225 KB en base64
+const FLYER_URL_MAX = 500;
+const FLYER_IMG_MAX = 300_000; // ~225 KB en base64
+// El link del flyer se valida con esquema http(s) para que nunca se pueda guardar
+// un javascript:/data: y terminar en un <a href> inyectando script.
+const FLYER_URL_RE = /^https?:\/\//i;
+const cleanFlyerUrl = (v) => {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return s && s.length <= FLYER_URL_MAX && FLYER_URL_RE.test(s) ? s : null;
+};
+const cleanFlyerImage = (v) =>
+  typeof v === 'string' && v.length <= FLYER_IMG_MAX && DATA_URL_RE.test(v) ? v : null;
 
 const DEFAULTS = {
   event_name: 'Muestra Escolar 2026',
@@ -333,12 +345,35 @@ export default {
       const isAdmin = await requireAdmin(req, db);
       const { results } = await db
         .prepare(
+          // flyer_image es el único campo pesado: solo viaja con sesión de admin
+          // (para previsualizar en el formulario). El catálogo público lleva un
+          // booleano has_flyer_image y el link; la imagen se sirve on-demand en
+          // /api/stands/:id/flyer para no inflar la carga inicial de los visitantes.
           `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image,
-                  schedule, location, stamp_style, is_published
+                  schedule, location, stamp_style, is_published, flyer_url,${isAdmin ? ' flyer_image,' : ''}
+                  (flyer_image IS NOT NULL AND flyer_image != '') AS has_flyer_image
            FROM stands${isAdmin ? '' : ' WHERE is_published = 1'} ORDER BY sort_order, id`
         )
         .all();
       return json({ stands: results });
+    }
+
+    // Imagen del flyer on-demand: decodifica el dataURL guardado y lo sirve con su
+    // content-type real. Solo stands publicados (el admin ya la tiene en el catálogo).
+    const fm = path.match(/^\/api\/stands\/(\d+)\/flyer$/);
+    if (method === 'GET' && fm) {
+      const row = await db
+        .prepare('SELECT flyer_image FROM stands WHERE id = ? AND is_published = 1')
+        .bind(Number(fm[1]))
+        .first();
+      const dm = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(
+        typeof row?.flyer_image === 'string' ? row.flyer_image : ''
+      );
+      if (!dm) return new Response('Not Found', { status: 404 });
+      const bytes = Uint8Array.from(atob(dm[2]), (c) => c.charCodeAt(0));
+      return new Response(bytes, {
+        headers: { 'content-type': dm[1], 'cache-control': 'public, max-age=300' },
+      });
     }
 
     if (method === 'GET' && path === '/api/config') {
@@ -567,20 +602,23 @@ const existing = await db
       const token = crypto.randomUUID();
       const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
       const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
+      const flyerUrl = cleanFlyerUrl(b.flyer_url);
+      const flyerImage = cleanFlyerImage(b.flyer_image);
       const secretWord = cleanText(b.secret_word, SECRET_WORD_MAX) || null;
       const dup = await wordOwner(db, secretWord, null);
       if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
       const stampStyle = STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : 'circular';
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style, flyer_url, flyer_image)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
           cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0,
-          secretWord, cleanText(b.schedule, 120) || null, cleanText(b.location, 120) || null, stampStyle
+          secretWord, cleanText(b.schedule, 120) || null, cleanText(b.location, 120) || null, stampStyle,
+          flyerUrl, flyerImage
         )
         .run();
       return json({ ok: true, stand: { id: Number(meta.last_row_id), slug, name, token } }, 201);
@@ -609,11 +647,13 @@ const existing = await db
         const dup = await wordOwner(db, secretWord, id);
         if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
         const stampStyle = has('stamp_style') ? (STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : null) : (cur.stamp_style ?? null);
+        const flyerUrl = has('flyer_url') ? cleanFlyerUrl(b.flyer_url) : cur.flyer_url ?? null;
+        const flyerImage = has('flyer_image') ? cleanFlyerImage(b.flyer_image) : cur.flyer_image ?? null;
         await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
                     is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ?,
-                    schedule = ?, location = ?, stamp_style = ? WHERE id = ?`
+                    schedule = ?, location = ?, stamp_style = ?, flyer_url = ?, flyer_image = ? WHERE id = ?`
           )
           .bind(
             name,
@@ -629,7 +669,7 @@ const existing = await db
             secretWord,
             has('schedule') ? cleanText(b.schedule, 120) || null : cur.schedule ?? null,
             has('location') ? cleanText(b.location, 120) || null : cur.location ?? null,
-            stampStyle, id
+            stampStyle, flyerUrl, flyerImage, id
           )
           .run();
         return json({ ok: true });

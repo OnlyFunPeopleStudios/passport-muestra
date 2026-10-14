@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import { usePassport } from '../context/PassportContext';
 import { FlagIcon } from '../data/flags';
 import { Stand } from '../types';
-import { 
-  Search, 
-  CheckCircle2, 
-  Star, 
-  QrCode, 
-  Clock, 
-  MapPin, 
+import {
+  Search,
+  CheckCircle2,
+  Star,
+  QrCode,
+  Clock,
+  MapPin,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  ExternalLink,
+  X,
 } from 'lucide-react';
 
 interface StandsListProps {
@@ -25,6 +27,7 @@ export const StandsList: React.FC<StandsListProps> = ({
   const { stands, visits, currentVisitor, config } = usePassport();
   const [search, setSearch] = useState('');
   const [selectedArea, setSelectedArea] = useState<string>('all');
+  const [flyerStand, setFlyerStand] = useState<Stand | null>(null);
 
   const publishedStands = stands.filter(s => s.is_published);
   const areas = Array.from(new Set(publishedStands.map(s => s.area)));
@@ -166,6 +169,16 @@ export const StandsList: React.FC<StandsListProps> = ({
                     </span>
                   )}
                 </div>
+
+                {(stand.flyer_url || stand.has_flyer_image) && (
+                  <button
+                    onClick={() => setFlyerStand(stand)}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-fuchsia-50 dark:bg-fuchsia-950/40 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-950/60 text-fuchsia-700 dark:text-fuchsia-300 text-xs font-bold rounded-xl border border-fuchsia-300/50 dark:border-fuchsia-800/50 transition"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Ver flyer del stand
+                  </button>
+                )}
               </div>
 
               {/* Bottom Actions */}
@@ -196,6 +209,58 @@ export const StandsList: React.FC<StandsListProps> = ({
           );
         })}
       </div>
+
+      {/* Modal del flyer del stand */}
+      {flyerStand && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+          onClick={() => setFlyerStand(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900 z-10">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  {flyerStand.name}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {flyerStand.course} · {flyerStand.area}
+                </p>
+              </div>
+              <button
+                onClick={() => setFlyerStand(null)}
+                aria-label="Cerrar"
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {flyerStand.has_flyer_image && (
+                <img
+                  src={`/api/stands/${flyerStand.id}/flyer`}
+                  alt={`Flyer de ${flyerStand.name}`}
+                  className="w-full rounded-2xl border border-slate-200 dark:border-slate-800"
+                />
+              )}
+              {flyerStand.flyer_url && (
+                <a
+                  href={flyerStand.flyer_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Abrir link del flyer
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

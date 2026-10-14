@@ -55,6 +55,9 @@ export interface Stand {
   stamp_color?: string;
   stamp_image?: string;
   stamp_style?: StampStyle;
+  flyer_url?: string;         // link externo del flyer/material (Drive, Canva, etc.)
+  flyer_image?: string;       // dataURL de la imagen del flyer (solo llega con sesión admin)
+  has_flyer_image?: boolean;  // el catálogo público expone el flag, no el base64
   sort_order: number;
   is_published: boolean;
 }

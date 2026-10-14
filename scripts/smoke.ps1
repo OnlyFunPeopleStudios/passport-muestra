@@ -691,6 +691,51 @@ Check '116. assets legacy de la app vieja (/app.js, /style.css, /stamp-renderer.
 $hq = Get-Raw '/vendor/html5-qrcode.min.js'
 Check '117. vendor usado por el SPA (html5-qrcode.min.js) -> 200' ($hq.ok -and $hq.status -eq 200)
 
+# ---------- V1.1: flyer / material por stand (link o imagen) ----------
+Write-Host ""
+Write-Host "== V1.1 (flyer por stand) ==" -ForegroundColor Cyan
+
+# 118. Crear stand con flyer (link + imagen) y verlo en el catálogo público.
+$dummyFlyer = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjMGY0YzgxIi8+PC9zdmc+'
+$fs = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand con Flyer'; flyer_url = 'https://example.com/flyer.pdf'; flyer_image = $dummyFlyer }
+Check '118. crear stand con flyer_url + flyer_image -> 201' ($fs.ok -and $fs.status -eq 201)
+$fsId = $fs.data.stand.id
+
+# 119. El catálogo público expone el link y el flag, pero NO el base64 (carga liviana).
+$fsPub = Invoke-Api GET '/api/stands' $null -Cookie ''
+$fsRow = @($fsPub.data.stands) | Where-Object { $_.id -eq $fsId } | Select-Object -First 1
+Check '119. catálogo público: flyer_url + has_flyer_image sin el base64' ($null -ne $fsRow -and $fsRow.flyer_url -eq 'https://example.com/flyer.pdf' -and $fsRow.has_flyer_image -eq 1 -and -not ($fsRow.PSObject.Properties.Name -contains 'flyer_image'))
+
+# 120. La imagen del flyer se sirve on-demand (no el fallback SPA).
+$fimg = Get-Raw "/api/stands/$fsId/flyer"
+Check '120. GET /api/stands/:id/flyer -> 200 con la imagen (svg)' ($fimg.ok -and $fimg.status -eq 200 -and $fimg.raw -match '<svg')
+
+# 121. Un link con esquema peligroso (javascript:) se ignora al guardar.
+$badFs = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand Flyer Peligroso'; flyer_url = 'javascript:alert(1)' }
+$badPub = Invoke-Api GET '/api/stands' $null -Cookie ''
+$badRow = @($badPub.data.stands) | Where-Object { $_.id -eq $badFs.data.stand.id } | Select-Object -First 1
+Check '121. flyer_url javascript: se descarta (queda vacío)' ($badFs.ok -and $null -eq $badRow.flyer_url)
+
+# 122. Quitar el flyer (PUT parcial a vacío): se limpia y la imagen deja de servirse.
+$clr = Invoke-Api PUT "/api/admin/stands/$fsId" @{ name = 'Stand con Flyer'; flyer_url = ''; flyer_image = '' }
+$fsPub2 = Invoke-Api GET '/api/stands' $null -Cookie ''
+$fsRow2 = @($fsPub2.data.stands) | Where-Object { $_.id -eq $fsId } | Select-Object -First 1
+$fimg2 = Get-Raw "/api/stands/$fsId/flyer"
+Check '122. limpiar flyer -> has_flyer_image=0 y /flyer -> 404' ($clr.ok -and $fsRow2.has_flyer_image -eq 0 -and $fimg2.status -eq 404)
+
+# 123. Editar otros campos no borra el flyer (actualización parcial), y el PDF/URL
+# con esquema https sobrevive a la relectura pública.
+$keep = Invoke-Api PUT "/api/admin/stands/$fsId" @{ name = 'Stand con Flyer'; flyer_url = 'https://example.com/v2.pdf' }
+$keepRow = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $fsId } | Select-Object -First 1
+Check '123. re-guardar solo el link lo persiste (sin borrar la imagen ya limpiada)' ($keep.ok -and $keepRow.flyer_url -eq 'https://example.com/v2.pdf' -and $keepRow.has_flyer_image -eq 0)
+
+# Cleanup: despublicar los stands creados (corrida idempotente, igual que V0.4).
+foreach ($st in @($fs, $badFs)) {
+  if ($st.ok) {
+    Invoke-Api PUT "/api/admin/stands/$($st.data.stand.id)" @{ name = $st.data.stand.name; is_published = $false } | Out-Null
+  }
+}
+
 Write-Host ""
 Write-Host "Resultado: $pass pass, $fail fail" -ForegroundColor $(if ($fail -eq 0) { 'Green' } else { 'Red' })
 exit $fail

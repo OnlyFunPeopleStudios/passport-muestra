@@ -606,7 +606,7 @@ Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -mat
 # espera catalogReady antes de resolver (QR y palabra comparten el mismo flujo
 # seguro). Además los errores distinguen el ORIGEN: catálogo no disponible /
 # datos del dispositivo desactualizados / código no reconocido real.
-Check '91. SW pm-v4 invalida el cache pm-v3 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v4'")
+Check '91. SW pm-v5 invalida el cache pm-v4 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v5'")
 Check '92. activate elimina caches que no arrancan con la versión actual' ($swSrc -match '!k\.startsWith\(VERSION\)' -and $swSrc -match 'keys\.filter')
 Check '93. la app React espera el catálogo antes de resolver (Preparando pasaporte...)' ($bundleSrc -match 'Preparando pasaporte' -and $bundleSrc -match 'No se pudo cargar el catálogo')
 Check '94. el SW mantiene networkFirst para /api/stands (red primero)' ($swSrc -match 'networkFirst\(req, DATA_CACHE\)')
@@ -765,8 +765,51 @@ $fic4 = Invoke-Api PUT "/api/admin/stands/$ficId" @{ name = 'Stand con Ficha'; t
 $ficRow4 = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $ficId } | Select-Object -First 1
 Check '128. topic se recorta a 80 caracteres' ($fic4.ok -and $ficRow4.topic.Length -eq 80)
 
+# ---------- V1.3: biblioteca de sellos reutilizables ----------
+Write-Host ""
+Write-Host "== V1.3 (biblioteca de sellos) ==" -ForegroundColor Cyan
+
+# Misma imagen SVG que el flyer, ahora como sello de la biblioteca.
+$dummyStamp = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjYjg4NjBjIi8+PC9zdmc+'
+
+# 129. Crear un sello en la biblioteca (imagen + forma).
+$mkStamp = Invoke-Api POST '/api/admin/stamps' @{ name = 'Sello Reutilizable'; image = $dummyStamp; style = 'hexagonal' }
+Check '129. crear sello en la biblioteca -> 201' ($mkStamp.ok -and $mkStamp.status -eq 201)
+$stampId = $mkStamp.data.stamp.id
+
+# 130. La biblioteca lista el sello creado (con imagen y forma).
+$libRow = @((Invoke-Api GET '/api/admin/stamps').data.stamps) | Where-Object { $_.id -eq $stampId } | Select-Object -First 1
+Check '130. la biblioteca lista el sello (imagen + forma)' ($null -ne $libRow -and $libRow.style -eq 'hexagonal' -and $libRow.image -eq $dummyStamp)
+
+# 131. Asignar el sello a un stand: el catalogo publico hereda su imagen y su forma.
+$asg = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand con Sello de Biblioteca'; flag = 'ar'; stamp_id = $stampId }
+$asgId = $asg.data.stand.id
+$asgRow = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $asgId } | Select-Object -First 1
+Check '131. sello asignado: el catalogo publico trae la imagen y la forma del sello' ($asg.ok -and $null -ne $asgRow -and $asgRow.stamp_id -eq $stampId -and $asgRow.stamp_image -eq $dummyStamp -and $asgRow.stamp_type -eq 'image' -and $asgRow.stamp_style -eq 'hexagonal')
+
+# 132. Reutilizar el mismo sello en otro stand (una imagen, varios stands).
+$asg2 = Invoke-Api POST '/api/admin/stands' @{ name = 'Stand con el Mismo Sello'; flag = 'br'; stamp_id = $stampId }
+$asg2Id = $asg2.data.stand.id
+$asg2Row = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $asg2Id } | Select-Object -First 1
+Check '132. el mismo sello se reutiliza en otro stand' ($asg2.ok -and $asg2Row.stamp_id -eq $stampId -and $asg2Row.stamp_image -eq $dummyStamp)
+
+# 133. Quitar el sello de un stand (stamp_id = null): deja de heredar la imagen.
+$unset = Invoke-Api PUT "/api/admin/stands/$asgId" @{ name = 'Stand con Sello de Biblioteca'; stamp_id = $null }
+$unsetRow = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $asgId } | Select-Object -First 1
+Check '133. quitar el sello del stand (stamp_id null) deja de traer la imagen' ($unset.ok -and $null -eq $unsetRow.stamp_id -and $null -eq $unsetRow.stamp_image)
+
+# 134. Borrar el sello de la biblioteca: los stands que lo usaban quedan sin sello.
+$delStamp = Invoke-Api DELETE "/api/admin/stamps/$stampId"
+$asg2Row2 = @((Invoke-Api GET '/api/stands' $null -Cookie '').data.stands) | Where-Object { $_.id -eq $asg2Id } | Select-Object -First 1
+$libGone = @((Invoke-Api GET '/api/admin/stamps').data.stamps) | Where-Object { $_.id -eq $stampId } | Select-Object -First 1
+Check '134. borrar el sello deja al stand sin sello y desaparece de la biblioteca' ($delStamp.ok -and $null -eq $asg2Row2.stamp_id -and $null -eq $asg2Row2.stamp_image -and $null -eq $libGone)
+
+# 135. Sello sin imagen valida -> 400 (no acepta cualquier texto).
+$badStamp = Invoke-Api POST '/api/admin/stamps' @{ name = 'Sello sin imagen'; image = 'no-es-una-imagen' }
+Check '135. sello sin imagen valida -> 400' (-not $badStamp.ok -and $badStamp.status -eq 400)
+
 # Cleanup: despublicar los stands creados (corrida idempotente, igual que V0.4).
-foreach ($st in @($fs, $badFs, $fic)) {
+foreach ($st in @($fs, $badFs, $fic, $asg, $asg2)) {
   if ($st.ok) {
     Invoke-Api PUT "/api/admin/stands/$($st.data.stand.id)" @{ name = $st.data.stand.name; is_published = $false } | Out-Null
   }

@@ -8,7 +8,8 @@
 // /admin y los assets de la app vanilla vieja: app.js, style.css, stamp-renderer.js,
 // qrcode-generator.js, manifest, icon.svg). El shell ahora son solo los archivos
 // que la app React actual usa.
-const VERSION = 'pm-v4';
+// pm-v5: invalida el cache pm-v4 (V1.3: biblioteca de sellos reutilizables).
+const VERSION = 'pm-v5';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

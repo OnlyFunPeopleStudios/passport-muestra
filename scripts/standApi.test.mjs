@@ -27,7 +27,7 @@ const check = (name, cond) => {
 // Campos que el admin puede editar y el worker acepta en POST/PUT /api/stands.
 // Si standToApi no manda uno de estos, el cambio se pierde al recargar.
 const EDITABLE = ['name', 'course', 'description', 'area', 'flag', 'is_published',
-  'stamp_icon', 'stamp_color', 'stamp_image', 'stamp_type', 'stamp_style',
+  'stamp_icon', 'stamp_color', 'stamp_image', 'stamp_type', 'stamp_style', 'stamp_id',
   'schedule', 'location', 'sort_order', 'secret_word', 'flyer_url', 'flyer_image',
   'topic', 'activities', 'highlight', 'fun_facts', 'invite_text'];
 
@@ -62,6 +62,13 @@ check('round-trip conserva stamp_style', back.stamp_style === 'hexagonal');
 // ---- 5. undefined se omite (permite updates parciales sin borrar datos) ----
 check('campo no enviado queda undefined (no null)', standToApi({}).schedule === undefined);
 check('string vacío sí se envía (permite limpiar el campo)', standToApi({ schedule: '' }).schedule === '');
+
+// ---- 6. Sello de la biblioteca (stamp_id) ----
+check('stamp_id se envía al API', standToApi({ stamp_id: 7 }).stamp_id === 7);
+check('stamp_id no enviado queda undefined', standToApi({}).stamp_id === undefined);
+check('stamp_id null se envía (permite quitar el sello)', standToApi({ stamp_id: null }).stamp_id === null);
+check('stamp_id API->front', standFromApi({ stamp_id: 7 }).stamp_id === 7);
+check('stamp_id por defecto es null (sin sello de biblioteca)', standFromApi({}).stamp_id === null);
 
 console.log('\n' + pass + ' pass / ' + fail + ' fail');
 if (fail > 0) process.exit(1);

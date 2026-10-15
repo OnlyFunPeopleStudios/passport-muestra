@@ -349,7 +349,7 @@ export default {
           // (para previsualizar en el formulario). El catálogo público lleva un
           // booleano has_flyer_image y el link; la imagen se sirve on-demand en
           // /api/stands/:id/flyer para no inflar la carga inicial de los visitantes.
-          `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image,
+          `SELECT id, slug, name, course, description, area, flag, token, secret_word, stamp_icon, stamp_color, stamp_type, stamp_image, stamp_id,
                   schedule, location, stamp_style, is_published, flyer_url,${isAdmin ? ' flyer_image,' : ''}
                   topic, activities, highlight, fun_facts, invite_text,
                   (flyer_image IS NOT NULL AND flyer_image != '') AS has_flyer_image
@@ -601,23 +601,32 @@ const existing = await db
       if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
       const slug = (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'stand') + '-' + Date.now().toString(36);
       const token = crypto.randomUUID();
-      const stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
-      const stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
+      let stampType = ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag';
+      let stampImage = (stampType === 'image' && typeof b.stamp_image === 'string' && b.stamp_image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.stamp_image)) ? b.stamp_image : null;
+      let stampId = Number(b.stamp_id) || null;
+      let stampStyle = STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : 'circular';
       const flyerUrl = cleanFlyerUrl(b.flyer_url);
       const flyerImage = cleanFlyerImage(b.flyer_image);
       const secretWord = cleanText(b.secret_word, SECRET_WORD_MAX) || null;
       const dup = await wordOwner(db, secretWord, null);
       if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
-      const stampStyle = STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : 'circular';
+      // Sello de la biblioteca: si se asigna, su imagen y su forma mandan sobre las propias.
+      // Se copian a stamp_image/stamp_type/stamp_style para que TODOS los lectores
+      // (catálogo, pasaporte, visitas, dashboard) lo vean sin cambios.
+      if (stampId) {
+        const lib = await db.prepare('SELECT image, style FROM stamps WHERE id = ?').bind(stampId).first();
+        if (lib) { stampImage = lib.image; stampType = 'image'; stampStyle = lib.style; }
+        else { stampId = null; }
+      }
       const { meta } = await db
         .prepare(
-          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, sort_order, secret_word, schedule, location, stamp_style, flyer_url, flyer_image, topic, activities, highlight, fun_facts, invite_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO stands (slug, name, course, description, area, flag, token, is_published, stamp_icon, stamp_color, stamp_type, stamp_image, stamp_id, sort_order, secret_word, schedule, location, stamp_style, flyer_url, flyer_image, topic, activities, highlight, fun_facts, invite_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           slug, name, cleanText(b.course, 60), cleanText(b.description, 300), cleanText(b.area, 60),
           cleanText(b.flag, 4) || '🌍', token, b.is_published === false ? 0 : 1,
-          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, Number(b.sort_order) || 0,
+          cleanText(b.stamp_icon, 8) || null, String(b.stamp_color ?? ''), stampType, stampImage, stampId, Number(b.sort_order) || 0,
           secretWord, cleanText(b.schedule, 120) || null, cleanText(b.location, 120) || null, stampStyle,
           flyerUrl, flyerImage,
           cleanText(b.topic, 80) || null, cleanText(b.activities, 400) || null,
@@ -640,7 +649,7 @@ const existing = await db
         const has = (k) => b[k] !== undefined;
         const name = has('name') ? cleanText(b.name, 60) : cur.name;
         if (!name) return json({ error: 'El stand necesita un nombre.' }, 400);
-        const stampType = has('stamp_type')
+        let stampType = has('stamp_type')
           ? ['flag', 'icon', 'image', 'color'].includes(b.stamp_type) ? b.stamp_type : 'flag'
           : cur.stamp_type || 'flag';
         let stampImage = cur.stamp_image ?? null;
@@ -650,13 +659,29 @@ const existing = await db
         const secretWord = has('secret_word') ? cleanText(b.secret_word, SECRET_WORD_MAX) || null : cur.secret_word ?? null;
         const dup = await wordOwner(db, secretWord, id);
         if (dup) return json({ error: `La palabra "${secretWord}" ya la usa otro stand (${dup.name}). Cada stand necesita una palabra distinta.` }, 400);
-        const stampStyle = has('stamp_style') ? (STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : null) : (cur.stamp_style ?? null);
+        let stampStyle = has('stamp_style') ? (STAMP_STYLES.includes(b.stamp_style) ? b.stamp_style : null) : (cur.stamp_style ?? null);
+        // Sello de la biblioteca: stamp_id = número para asignar, null para quitarlo.
+        // Si no viene en el body, se conserva el actual (actualización parcial).
+        let stampId = has('stamp_id') ? (b.stamp_id ? Number(b.stamp_id) : null) : (cur.stamp_id ?? null);
+        if (has('stamp_id')) {
+          if (stampId) {
+            // Se asigna un sello de la biblioteca: se copian su imagen y su forma
+            // a las columnas propias del stand (todos los lectores las usan tal cual).
+            const lib = await db.prepare('SELECT image, style FROM stamps WHERE id = ?').bind(stampId).first();
+            if (lib) { stampImage = lib.image; stampType = 'image'; stampStyle = lib.style; }
+            else { stampId = cur.stamp_id ?? null; }
+          } else if (cur.stamp_id) {
+            // Se quitó el sello de biblioteca: el stand vuelve a su sello propio.
+            stampImage = null;
+            stampType = 'flag';
+          }
+        }
         const flyerUrl = has('flyer_url') ? cleanFlyerUrl(b.flyer_url) : cur.flyer_url ?? null;
         const flyerImage = has('flyer_image') ? cleanFlyerImage(b.flyer_image) : cur.flyer_image ?? null;
         await db
           .prepare(
             `UPDATE stands SET name = ?, course = ?, description = ?, area = ?, flag = ?,
-                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, sort_order = ?, secret_word = ?,
+                    is_published = ?, stamp_icon = ?, stamp_color = ?, stamp_type = ?, stamp_image = ?, stamp_id = ?, sort_order = ?, secret_word = ?,
                     schedule = ?, location = ?, stamp_style = ?, flyer_url = ?, flyer_image = ?,
                     topic = ?, activities = ?, highlight = ?, fun_facts = ?, invite_text = ? WHERE id = ?`
           )
@@ -669,7 +694,7 @@ const existing = await db
             has('is_published') ? (b.is_published === false ? 0 : 1) : cur.is_published,
             has('stamp_icon') ? cleanText(b.stamp_icon, 8) || null : cur.stamp_icon ?? null,
             has('stamp_color') ? String(b.stamp_color ?? '') : cur.stamp_color ?? '',
-            stampType, stampImage,
+            stampType, stampImage, stampId,
             has('sort_order') ? Number(b.sort_order) || 0 : cur.sort_order ?? 0,
             secretWord,
             has('schedule') ? cleanText(b.schedule, 120) || null : cur.schedule ?? null,
@@ -695,6 +720,41 @@ const existing = await db
         await db.prepare('UPDATE stands SET token = ? WHERE id = ?').bind(token, id).run();
         return json({ ok: true, token });
       }
+    }
+
+    // Biblioteca de sellos reutilizables (V1.3): una imagen + una forma que se
+    // puede asignar a varios stands (stands.stamp_id). El frente no cambia: el
+    // catálogo resuelve la imagen del sello y la devuelve como stamp_image.
+    if (method === 'GET' && path === '/api/admin/stamps') {
+      const { results } = await db
+        .prepare('SELECT id, name, style, image, created_at FROM stamps ORDER BY id DESC')
+        .all();
+      return json({ stamps: results });
+    }
+
+    if (method === 'POST' && path === '/api/admin/stamps') {
+      const b = await req.json().catch(() => ({}));
+      const image = (typeof b.image === 'string' && b.image.length <= 300000 && /^data:image\/(?:png|webp|jpeg|svg\+xml);base64,/.test(b.image))
+        ? b.image
+        : null;
+      if (!image) return json({ error: 'Subí una imagen válida para el sello.' }, 400);
+      const name = cleanText(b.name, 60) || 'Sello';
+      const style = STAMP_STYLES.includes(b.style) ? b.style : 'circular';
+      const { meta } = await db
+        .prepare('INSERT INTO stamps (name, image, style) VALUES (?, ?, ?)')
+        .bind(name, image, style)
+        .run();
+      return json({ ok: true, stamp: { id: Number(meta.last_row_id), name, style, image } }, 201);
+    }
+
+    const stampMatch = path.match(/^\/api\/admin\/stamps\/(\d+)$/);
+    if (method === 'DELETE' && stampMatch) {
+      const id = Number(stampMatch[1]);
+      // Los stands que lo usaban vuelven a su sello propio (bandera): no alcanza con
+      // limpiar stamp_id porque la imagen ya estaba copiada en stamp_image.
+      await db.prepare("UPDATE stands SET stamp_id = NULL, stamp_image = NULL, stamp_type = 'flag' WHERE stamp_id = ?").bind(id).run();
+      await db.prepare('DELETE FROM stamps WHERE id = ?').bind(id).run();
+      return json({ ok: true });
     }
 
     if (method === 'GET' && path === '/api/admin/comments') {

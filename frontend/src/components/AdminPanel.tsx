@@ -3,7 +3,7 @@ import { usePassport } from '../context/PassportContext';
 import { Stand, StampStyle, EventConfig } from '../types';
 import { FlagIcon, FLAGS } from '../data/flags';
 import { StampBadge } from './StampBadge';
-import { StampCreatorStudio } from './StampCreatorStudio';
+import { StampLibrary } from './StampLibrary';
 import { QRPosterModal } from './QRPosterModal';
 import { MaterialMuestraView } from './MaterialMuestraView';
 import { StandStatsPanel } from './StandStatsPanel';
@@ -57,6 +57,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
   const {
     config,
     stands,
+    stamps,
     visitors,
     visits,
     isAdmin,
@@ -84,6 +85,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
 
   // Stand modal state
   const [editingStand, setEditingStand] = useState<Stand | null>(null);
+  const [isCreatingStand, setIsCreatingStand] = useState(false);
   const [standFormData, setStandFormData] = useState<{
     slug: string;
     name: string;
@@ -97,6 +99,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     stamp_style: StampStyle;
     stamp_image?: string;
     stamp_type?: 'bandera' | 'icono' | 'color' | 'imagen';
+    stamp_id?: number | null;
     sort_order: number;
     is_published: boolean;
     flyer_url: string;
@@ -119,6 +122,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     stamp_style: 'circular',
     stamp_image: undefined,
     stamp_type: 'bandera',
+    stamp_id: null,
     sort_order: stands.length + 1,
     is_published: true,
     flyer_url: '',
@@ -355,6 +359,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
 
   const handleOpenEditStand = (stand: Stand) => {
     setEditingStand(stand);
+    setIsCreatingStand(false);
     setStandFormData({
       slug: stand.slug,
       name: stand.name,
@@ -368,6 +373,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
       stamp_style: stand.stamp_style || config.stamp_style || 'circular',
       stamp_image: stand.stamp_image,
       stamp_type: stand.stamp_type,
+      stamp_id: stand.stamp_id ?? null,
       sort_order: stand.sort_order,
       is_published: stand.is_published,
       flyer_url: stand.flyer_url || '',
@@ -380,11 +386,56 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     });
   };
 
+  // Abre el formulario en blanco para crear un stand nuevo (mismo modal que editar).
+  const handleNewStand = () => {
+    setEditingStand(null);
+    setIsCreatingStand(true);
+    setStandFormData({
+      slug: '',
+      name: '',
+      course: '',
+      description: '',
+      area: 'Ciencias Naturales',
+      flag: 'ar',
+      secret_word: '',
+      schedule: '09:00 - 17:30 hs',
+      location: 'Patio Central',
+      stamp_style: config.stamp_style || 'circular',
+      stamp_image: undefined,
+      stamp_type: 'bandera',
+      stamp_id: null,
+      sort_order: stands.length + 1,
+      is_published: true,
+      flyer_url: '',
+      flyer_image: undefined,
+      topic: '',
+      activities: '',
+      highlight: '',
+      fun_facts: '',
+      invite_text: '',
+    });
+  };
+
+  const closeStandModal = () => {
+    setEditingStand(null);
+    setIsCreatingStand(false);
+  };
+
   const handleSaveStand = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingStand) {
-      await updateStand(editingStand.id, standFormData);
-      setEditingStand(null);
+    try {
+      if (isCreatingStand) {
+        await createStand({
+          ...(standFormData as Omit<Stand, 'id' | 'token'>),
+          slug: standFormData.slug || 'stand',
+        });
+        closeStandModal();
+      } else if (editingStand) {
+        await updateStand(editingStand.id, standFormData);
+        closeStandModal();
+      }
+    } catch (err: any) {
+      window.alert(err?.message || 'No se pudo guardar el stand.');
     }
   };
 
@@ -527,7 +578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
             className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            + Crear Sello
+            + Sello
           </button>
           <button
             onClick={() => exportCSV('summary')}
@@ -551,7 +602,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
         {[
           { id: 'dashboard', label: '📊 Resumen', icon: LayoutDashboard },
           { id: 'stats', label: '📈 Gráficos de Sellos', icon: BarChart3 },
-          { id: 'creator', label: '🎨 Creador de Sellos', icon: Sparkles },
+          { id: 'creator', label: '🎨 Sellos', icon: Sparkles },
           { id: 'stands', label: `🏫 Stands (${stands.length})`, icon: Store },
           { id: 'posters', label: '🖨️ Carteles QR & Palabras', icon: QrCode },
           { id: 'material', label: '📦 Material para la Muestra', icon: FileDown },
@@ -579,10 +630,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
         })}
       </div>
 
-      {/* TAB: CREADOR DE SELLOS */}
-      {activeTab === 'creator' && (
-        <StampCreatorStudio onStandCreated={() => setActiveTab('stands')} />
-      )}
+      {/* TAB: BIBLIOTECA DE SELLOS */}
+      {activeTab === 'creator' && <StampLibrary />}
 
       {/* TAB: ESTADÍSTICAS RECHARTS */}
       {activeTab === 'stats' && (
@@ -767,10 +816,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setActiveTab('creator')}
-                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                Diseñar Nuevo Sello
+                Sellos
+              </button>
+              <button
+                onClick={handleNewStand}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Nuevo Stand
               </button>
             </div>
           </div>
@@ -912,12 +968,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
         </div>
       )}
 
-      {/* Stand Edit Modal */}
-      {editingStand && (
+      {/* Stand Edit / Create Modal */}
+      {(editingStand || isCreatingStand) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto text-slate-800 dark:text-slate-100">
             <h3 className="text-base font-bold">
-              Editar Stand: {editingStand.name}
+              {isCreatingStand ? 'Nuevo Stand' : `Editar Stand: ${editingStand?.name}`}
             </h3>
 
             <form onSubmit={handleSaveStand} className="space-y-3.5 text-xs">
@@ -988,27 +1044,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
                   />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1 col-span-2">
                   <label className="font-semibold text-slate-700 dark:text-slate-300">
-                    Forma del Sello
+                    Sello del stand
                   </label>
                   <select
-                    value={standFormData.stamp_style}
+                    value={standFormData.stamp_id ?? ''}
                     onChange={e =>
                       setStandFormData({
                         ...standFormData,
-                        stamp_style: e.target.value as StampStyle,
+                        stamp_id: e.target.value ? Number(e.target.value) : null,
                       })
                     }
                     className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl font-medium"
                   >
-                    <option value="circular">🔘 Circular</option>
-                    <option value="estampilla">🏷️ Estampilla Postal</option>
-                    <option value="cuadrado">⏹️ Cuadrado</option>
-                    <option value="hexagonal">⬡ Hexagonal</option>
-                    <option value="escudo">🛡️ Escudo</option>
+                    <option value="">— Sello propio del stand (bandera / color / ícono) —</option>
+                    {stamps.map(s => (
+                      <option key={s.id} value={s.id}>🖼️ {s.name}</option>
+                    ))}
                   </select>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    {standFormData.stamp_id
+                      ? 'Usa un sello de la biblioteca: la imagen y la forma las define el sello, y este stand le agrega su nombre y su curso.'
+                      : 'Sello propio: se dibuja con la bandera del país, un color o un ícono (elegís la forma abajo).'}
+                  </p>
+                  {stamps.length === 0 && (
+                    <p className="text-[11px] text-indigo-600 dark:text-indigo-400">
+                      Todavía no hay sellos guardados. Creá uno en la pestaña <strong>Sellos</strong>.
+                    </p>
+                  )}
                 </div>
+
+                {!standFormData.stamp_id && (
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
+                      Forma del Sello
+                    </label>
+                    <select
+                      value={standFormData.stamp_style}
+                      onChange={e =>
+                        setStandFormData({
+                          ...standFormData,
+                          stamp_style: e.target.value as StampStyle,
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl font-medium"
+                    >
+                      <option value="circular">🔘 Circular</option>
+                      <option value="estampilla">🏷️ Estampilla Postal</option>
+                      <option value="cuadrado">⏹️ Cuadrado</option>
+                      <option value="hexagonal">⬡ Hexagonal</option>
+                      <option value="escudo">🛡️ Escudo</option>
+                    </select>
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="font-semibold text-slate-700 dark:text-slate-300">
@@ -1207,7 +1296,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setEditingStand(null)}
+                  onClick={closeStandModal}
                   className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-semibold cursor-pointer"
                 >
                   Cancelar

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { EventConfig, Stand, Visitor, Visit, VisitWithDetails } from '../types';
+import { EventConfig, Stand, Stamp, StampStyle, Visitor, Visit, VisitWithDetails } from '../types';
 import { DEFAULT_CONFIG } from '../data/seedData';
 import {
   CatalogSource,
@@ -113,6 +113,10 @@ export interface AdminActionResult {
 interface PassportContextType {
   config: EventConfig;
   stands: Stand[];
+  stamps: Stamp[];
+  refreshStamps: () => Promise<void>;
+  createStamp: (data: { name: string; image: string; style: StampStyle }) => Promise<Stamp>;
+  deleteStamp: (id: number) => Promise<void>;
   catalogStatus: CatalogStatus;
   catalogSource: CatalogSource;
   catalogReady: boolean;
@@ -185,6 +189,7 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [adminVisits, setAdminVisits] = useState<Visit[]>([]);
   const [adminVisitors, setAdminVisitors] = useState<Visitor[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [stamps, setStamps] = useState<Stamp[]>([]);
 
   // ---------- catálogo + config ----------
 
@@ -224,6 +229,15 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (res && res.ok) {
       const d = await res.json();
       if (d?.config) setConfig(d.config);
+    }
+  };
+
+  // Sellos reutilizables de la biblioteca (V1.3). Solo los usa el Centro de Mando.
+  const refreshStamps = async () => {
+    const res = await fetch('/api/admin/stamps').catch(() => null);
+    if (res && res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setStamps(d.stamps || []);
     }
   };
 
@@ -535,6 +549,7 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // La grilla de stands del Centro de Mando necesita ver también los ocultos:
     // /api/stands devuelve todos cuando hay sesión de admin (ver worker.js).
     await refreshCatalog();
+    await refreshStamps();
   };
 
   const checkAdmin = async () => {
@@ -681,6 +696,24 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await refreshCatalog();
   };
 
+  const createStamp = async (data: { name: string; image: string; style: StampStyle }): Promise<Stamp> => {
+    const res = await fetch('/api/admin/stamps', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(data),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'No se pudo guardar el sello.');
+    await refreshStamps();
+    return d.stamp as Stamp;
+  };
+
+  const deleteStamp = async (id: number) => {
+    await fetch('/api/admin/stamps/' + id, { method: 'DELETE' }).catch(() => null);
+    await refreshStamps();
+    await refreshCatalog(); // los stands que lo usaban vuelven a su sello propio
+  };
+
   const regenerateStandToken = async (id: number): Promise<string> => {
     const res = await fetch('/api/admin/stands/' + id + '/token', { method: 'POST' }).catch(() => null);
     const d = res?.ok ? await res.json().catch(() => ({})) : {};
@@ -749,6 +782,10 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         config,
         stands,
+        stamps,
+        refreshStamps,
+        createStamp,
+        deleteStamp,
         catalogStatus,
         catalogSource,
         catalogReady: catalogStatus === 'ready',

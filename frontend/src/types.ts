@@ -60,11 +60,22 @@ export interface Stand {
   stamp_color?: string;
   stamp_image?: string;
   stamp_style?: StampStyle;
+  stamp_id?: number | null;   // sello de la biblioteca reutilizable (si está, manda sobre stamp_image/stamp_style)
   flyer_url?: string;         // link externo del flyer/material (Drive, Canva, etc.)
   flyer_image?: string;       // dataURL de la imagen del flyer (solo llega con sesión admin)
   has_flyer_image?: boolean;  // el catálogo público expone el flag, no el base64
   sort_order: number;
   is_published: boolean;
+}
+
+// Sello reutilizable (biblioteca V1.3): una imagen + una forma que se asignan a
+// varios stands. Ver worker GET/POST/DELETE /api/admin/stamps.
+export interface Stamp {
+  id: number;
+  name: string;
+  image: string;
+  style: StampStyle;
+  created_at?: string;
 }
 
 export interface Visitor {

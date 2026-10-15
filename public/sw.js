@@ -9,7 +9,8 @@
 // qrcode-generator.js, manifest, icon.svg). El shell ahora son solo los archivos
 // que la app React actual usa.
 // pm-v5: invalida el cache pm-v4 (V1.3: biblioteca de sellos reutilizables).
-const VERSION = 'pm-v5';
+// pm-v6: recuperación de pasaportes huérfanos (token ya borrado en el servidor).
+const VERSION = 'pm-v6';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

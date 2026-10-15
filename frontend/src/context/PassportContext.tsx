@@ -256,6 +256,16 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.removeItem(CREATED_KEY);
   };
 
+  // El backend responde 404 'pasaporte no encontrado' cuando el token guardado
+  // ya no existe (p. ej. el admin restableció los pasaportes). Se descarta el
+  // pasaporte local para que el visitante pueda crear uno nuevo, en vez de
+  // quedar atascado en un error permanente al visitar o calificar.
+  const dropStalePassport = () => {
+    clearVisitor();
+    setCurrentVisitorState(null);
+    setVisitorVisits([]);
+  };
+
   const refreshPassport = async (vt: string) => {
     let serverVisits: any[] = [];
     let serverVisitor: any = null;
@@ -265,6 +275,9 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const d = await res.json();
         serverVisits = d.visits || [];
         serverVisitor = d.visitor || null;
+      } else if (res.status === 404) {
+        dropStalePassport();
+        return;
       }
     } catch {
       /* sin red: se usa el espejo local */
@@ -448,6 +461,14 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return { success: false, already: true, error: config.texts.already_visited, stand, visit };
       }
       const d = await res.json().catch(() => ({}));
+      if (res.status === 404 && d.error === 'pasaporte no encontrado') {
+        dropStalePassport();
+        return {
+          success: false,
+          errorTitle: 'Pasaporte no encontrado',
+          error: 'Tu pasaporte quedó desactualizado. Creá uno nuevo en 🛂 Mi Pasaporte y volvé a intentar.',
+        };
+      }
       return { success: false, error: d.error || 'No se pudo registrar la visita.' };
     } catch {
       try {
@@ -483,7 +504,8 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       visitorToken && isAdmin
         ? adminVisitors.find(v => v.token === visitorToken) || currentVisitor
         : currentVisitor;
-    if (!target) return { success: false, error: 'Visitante no identificado.' };
+    if (!target)
+      return { success: false, error: 'Creá tu pasaporte (pestaña 🛂 Mi Pasaporte) para poder calificar.' };
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       return { success: false, error: 'La calificación debe ser de 1 a 5 estrellas.' };
     }
@@ -498,6 +520,13 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
+        if (res.status === 404 && d.error === 'pasaporte no encontrado') {
+          dropStalePassport();
+          return {
+            success: false,
+            error: 'Tu pasaporte quedó desactualizado. Creá uno nuevo en 🛂 Mi Pasaporte y volvé a intentar.',
+          };
+        }
         return { success: false, error: d.error || 'No se pudo guardar la evaluación.' };
       }
       await refreshPassport(target.token);

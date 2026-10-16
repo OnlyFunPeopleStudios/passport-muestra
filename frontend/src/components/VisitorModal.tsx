@@ -24,6 +24,10 @@ export const VisitorModal: React.FC<VisitorModalProps> = ({ onClose }) => {
 
   const handleSaveName = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!nameInput.trim()) {
+      window.alert('Ingresá tu nombre o un apodo.');
+      return;
+    }
     await updateVisitorName(nameInput);
     setIsSaved(true);
     setTimeout(() => {
@@ -34,6 +38,10 @@ export const VisitorModal: React.FC<VisitorModalProps> = ({ onClose }) => {
 
   const handleResetNewPassport = async () => {
     if (window.confirm('¿Querés reiniciar y comenzar con un nuevo pasaporte en blanco?')) {
+      if (!nameInput.trim()) {
+        window.alert('Ingresá tu nombre o un apodo para crear el pasaporte.');
+        return;
+      }
       try {
         await createVisitor(nameInput);
         onClose();

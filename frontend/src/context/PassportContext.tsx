@@ -767,7 +767,12 @@ export const PassportProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     off()?.init();
     void refreshConfig();
     void refreshCatalog();
-    if (currentVisitor?.token) void refreshPassport(currentVisitor.token);
+    if (currentVisitor?.token) {
+      // Ya no se permite ingresar sin nombre: un pasaporte local sin nombre
+      // (creado como anónimo) se descarta y el visitante crea uno nuevo.
+      if (!currentVisitor.name) dropStalePassport();
+      else void refreshPassport(currentVisitor.token);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

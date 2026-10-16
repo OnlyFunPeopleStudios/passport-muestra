@@ -10,7 +10,8 @@
 // que la app React actual usa.
 // pm-v5: invalida el cache pm-v4 (V1.3: biblioteca de sellos reutilizables).
 // pm-v6: recuperación de pasaportes huérfanos (token ya borrado en el servidor).
-const VERSION = 'pm-v6';
+// pm-v7: actos de programa (sin stand) y nombre obligatorio (se elimino el ingreso anonimo).
+const VERSION = 'pm-v7';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

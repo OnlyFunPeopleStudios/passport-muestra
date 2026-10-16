@@ -24,7 +24,7 @@ $script:lastSetCookie = $null
 
 function Invoke-Api($Method, $Path, $Body, [string]$Cookie = $null) {
   $params = @{ Uri = "$Base$Path"; Method = $Method; UseBasicParsing = $true; TimeoutSec = 30 }
-  if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json); $params.ContentType = 'application/json' }
+  if ($null -ne $Body) { $params.Body = ($Body | ConvertTo-Json -Depth 10); $params.ContentType = 'application/json' }
   $useCookie = if ($PSBoundParameters.ContainsKey('Cookie')) { $Cookie } else { $script:adminCookie }
   if ($useCookie) { $params.Headers = @{ Cookie = $useCookie } }
   try {
@@ -390,6 +390,24 @@ $pMaV1 = $pMa.data.visits | Where-Object { $_.stand_id -eq $ma1.data.stand.id } 
 $pMaV2 = $pMa.data.visits | Where-Object { $_.stand_id -eq $ma2.data.stand.id } | Select-Object -First 1
 Check '47. evaluaciones independientes de Marruecos preservadas con flag=ma' ($ev1.ok -and $ev2.ok -and $pMaV1.rating -eq 5 -and $pMaV2.rating -eq 4 -and $pMaV1.flag -eq 'ma' -and $pMaV2.flag -eq 'ma')
 
+# 136. El nombre es obligatorio: sin nombre no hay pasaporte (valoraciones identificadas).
+$vSinNombre = Invoke-Api POST '/api/visitors' @{ name = '' } -Cookie ''
+$vLargo = Invoke-Api POST '/api/visitors' @{ name = ('Nombre super largo ' * 20) } -Cookie ''
+Check '136. crear visitante sin nombre -> 400; con nombre -> 201' ($vSinNombre.status -eq 400 -and -not $vSinNombre.ok -and $vLargo.ok -and $vLargo.status -eq 201)
+
+# 137. Renombrar a vacio tampoco deja pasaportes anonimos.
+$renombreVacio = Invoke-Api PATCH '/api/visitors' @{ vt = $vLargo.data.visitor.token; name = '   ' }
+Check '137. renombrar el visitante a vacio -> 400' ($renombreVacio.status -eq 400 -and -not $renombreVacio.ok)
+
+# 138. El programa del evento (actos sin stand) se guarda y se vuelve a leer.
+$progItems = @(
+  @{ time = '10:00'; title = 'Acto de apertura'; note = 'Patio de actos' },
+  @{ time = '17:30'; title = 'Acto de cierre'; note = '' }
+)
+$setProg = Invoke-Api PUT '/api/admin/config' @{ config = @{ program = $progItems } }
+$backProg = @((Invoke-Api GET '/api/config' $null -Cookie '').data.config.program)
+Check '138. el programa del evento persiste (2 actos, con hora y nota)' ($setProg.ok -and $backProg.Count -eq 2 -and $backProg[0].time -eq '10:00' -and $backProg[0].title -eq 'Acto de apertura' -and $backProg[0].note -eq 'Patio de actos' -and $backProg[1].title -eq 'Acto de cierre')
+
 # Cleanup: despublicar los 6 stands creados en esta seccion para que la corrida sea idempotente
 # (mismo patron que los tests 9/10; si no, "listar stands -> 14" falla en la corrida siguiente).
 foreach ($st in @($flagStand, $iconStand, $imgStand, $colStand, $ma1, $ma2)) {
@@ -606,7 +624,7 @@ Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -mat
 # espera catalogReady antes de resolver (QR y palabra comparten el mismo flujo
 # seguro). Además los errores distinguen el ORIGEN: catálogo no disponible /
 # datos del dispositivo desactualizados / código no reconocido real.
-Check '91. SW pm-v6 invalida el cache pm-v5 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v6'")
+Check '91. SW pm-v7 invalida el cache pm-v5 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v7'")
 Check '92. activate elimina caches que no arrancan con la versión actual' ($swSrc -match '!k\.startsWith\(VERSION\)' -and $swSrc -match 'keys\.filter')
 Check '93. la app React espera el catálogo antes de resolver (Preparando pasaporte...)' ($bundleSrc -match 'Preparando pasaporte' -and $bundleSrc -match 'No se pudo cargar el catálogo')
 Check '94. el SW mantiene networkFirst para /api/stands (red primero)' ($swSrc -match 'networkFirst\(req, DATA_CACHE\)')

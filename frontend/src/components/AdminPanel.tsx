@@ -1342,6 +1342,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
             </div>
           )}
 
+          {/* PROGRAMA: actos sin stand (apertura, cierre, etc.) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl shadow-sm space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-amber-500 text-white font-black text-xs flex items-center justify-center shadow">
+                <Clock className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">Programa de la Muestra</h4>
+                <span className="text-[11px] text-slate-400">
+                  Actos sin stand (apertura, cierre, etc.). Un acto por línea: 10:00 - Acto de apertura | Patio de actos
+                </span>
+              </div>
+            </div>
+            <textarea
+              rows={5}
+              value={(draftConfig.program || [])
+                .map(a => [a.time, a.title].filter(Boolean).join(' - ') + (a.note ? ' | ' + a.note : ''))
+                .join('\n')}
+              onChange={e =>
+                setDraftConfig(prev => ({
+                  ...prev,
+                  program: e.target.value
+                    .split('\n')
+                    .map(l => l.trim())
+                    .filter(Boolean)
+                    .map(line => {
+                      const m = line.match(/^(\d{1,2}:\d{2})\s*[-–]?\s*(.*)$/);
+                      const rest = m ? m[2] : line;
+                      const [title, ...nota] = rest.split('|');
+                      return { time: m ? m[1] : '', title: title.trim(), note: nota.join('|').trim() };
+                    })
+                    .filter(a => a.title),
+                }))
+              }
+              placeholder={'10:00 - Acto de apertura | Patio de actos\n17:30 - Acto de cierre'}
+              className="w-full text-xs font-mono p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+            />
+          </div>
+
           {/* 1. SECCIÓN: LOGO DEL COLEGIO / INSTITUCIÓN */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl shadow-sm space-y-4">
             <div className="flex items-center justify-between">

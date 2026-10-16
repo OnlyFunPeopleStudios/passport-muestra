@@ -22,6 +22,12 @@ export interface EventTexts {
   completed: string;
 }
 
+export interface ProgramItem {
+  time: string;
+  title: string;
+  note: string;
+}
+
 export interface EventConfig {
   event_name: string;
   event_subtitle: string;
@@ -36,6 +42,7 @@ export interface EventConfig {
   text_secondary_color: string;
   stamp_style: StampStyle;
   texts: EventTexts;
+  program: ProgramItem[];
 }
 
 export interface Stand {

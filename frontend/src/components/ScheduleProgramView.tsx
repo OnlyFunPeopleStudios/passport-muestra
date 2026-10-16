@@ -67,6 +67,17 @@ export const ScheduleProgramView: React.FC<ScheduleProgramViewProps> = ({
     return true;
   });
 
+  // Actos del programa (los agrega el admin; no tienen stand asociado).
+  const actos = (config.program || [])
+    .filter(a => {
+      const q = search.trim().toLowerCase();
+      if (q && !(a.title + ' ' + a.note).toLowerCase().includes(q)) return false;
+      const h = parseInt((a.time || '').slice(0, 2), 10);
+      if (Number.isNaN(h)) return filterPeriod === 'all';
+      return filterPeriod === 'all' || (filterPeriod === 'morning' ? h >= 8 && h <= 12 : h >= 13 && h <= 18);
+    })
+    .sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
+
   return (
     <div className="space-y-6 pb-20">
       {/* Header */}
@@ -130,6 +141,27 @@ export const ScheduleProgramView: React.FC<ScheduleProgramViewProps> = ({
           ⛅ Turno Tarde
         </button>
       </div>
+
+      {/* Actos del dia (agregados por el admin) */}
+      {actos.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            Actos de la Muestra
+          </h3>
+          {actos.map(a => (
+            <div key={a.time + a.title} className="p-4 rounded-2xl border border-amber-300/60 dark:border-amber-700/40 bg-amber-50/60 dark:bg-amber-950/20 flex items-start gap-3.5">
+              <span className="shrink-0 font-mono font-black text-sm text-amber-700 dark:text-amber-300 mt-0.5">
+                {a.time || '--:--'}
+              </span>
+              <div className="space-y-0.5">
+                <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100">{a.title}</h4>
+                {a.note && <p className="text-xs text-slate-600 dark:text-slate-400">{a.note}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Timeline Schedule Cards */}
       <div className="space-y-3">

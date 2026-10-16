@@ -9,16 +9,13 @@ export const WelcomeOnboarding: React.FC = () => {
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await createVisitor(nameInput);
-    } catch (err: any) {
-      setError(err?.message || 'No se pudo crear tu pasaporte.');
+    const name = nameInput.trim();
+    if (!name) {
+      setError('Ingresá tu nombre o un apodo para continuar.');
+      return;
     }
-  };
-
-  const handleStartAnonymous = async () => {
     try {
-      await createVisitor('');
+      await createVisitor(name);
     } catch (err: any) {
       setError(err?.message || 'No se pudo crear tu pasaporte.');
     }
@@ -108,14 +105,6 @@ export const WelcomeOnboarding: React.FC = () => {
               <BookOpen className="w-4 h-4" />
               <span>Crear mi Pasaporte y Comenzar</span>
               <ArrowRight className="w-4 h-4 ml-auto" />
-            </button>
-
-            <button
-              type="button"
-              onClick={handleStartAnonymous}
-              className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 active:scale-98 text-slate-600 dark:text-slate-300 rounded-2xl text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <span>🕶️ Continuar como Anónimo</span>
             </button>
 
             {error && (

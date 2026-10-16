@@ -32,6 +32,7 @@ export const DEFAULT_CONFIG: EventConfig = {
     progress_suffix: 'stands visitados',
     completed: '¡Pasaporte completo! ¡Felicitaciones! 🎉',
   },
+  program: [],
 };
 
 export const COLOR_PRESETS = [

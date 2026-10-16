@@ -118,7 +118,12 @@ function cleanConfig(cfg) {
   let logo = null;
   const raw = String(cfg?.logo ?? '');
   if (raw && raw.length <= LOGO_MAX && DATA_URL_RE.test(raw)) logo = raw;
+  const program = (Array.isArray(cfg?.program) ? cfg.program : [])
+    .slice(0, 40)
+    .map((it) => ({ time: cleanText(it?.time, 8), title: cleanText(it?.title, 60), note: cleanText(it?.note, 120) }))
+    .filter((it) => it.title);
   return {
+    program,
     event_name: cleanText(cfg?.event_name, 80) || DEFAULTS.event_name,
     event_subtitle: cleanText(cfg?.event_subtitle, 120),
     institution_name: cleanText(cfg?.institution_name, 120),
@@ -138,11 +143,16 @@ function cleanConfig(cfg) {
 async function getConfig(db) {
   const row = await db.prepare('SELECT * FROM event_config WHERE id = 1').first();
   if (!row) return { ...DEFAULTS, texts: { ...DEFAULTS.texts } };
-  let cfg = { ...row, texts: {} };
+  let cfg = { ...row, texts: {}, program: [] };
   try {
     cfg.texts = JSON.parse(row.texts_json || '{}');
   } catch {
     cfg.texts = {};
+  }
+  try {
+    cfg.program = JSON.parse(row.program_json || '[]');
+  } catch {
+    cfg.program = [];
   }
   return cleanConfig(cfg);
 }
@@ -314,6 +324,8 @@ export default {
 
     if (method === 'POST' && path === '/api/visitors') {
       const name = sanitizeName((await req.json().catch(() => ({}))).name);
+      // Sin nombre no hay pasaporte: las valoraciones tienen que quedar identificadas.
+      if (!name) return json({ error: 'Ingres tu nombre o un apodo para crear el pasaporte.' }, 400);
       const token = crypto.randomUUID();
       try {
         const { meta } = await db
@@ -329,6 +341,7 @@ export default {
     if (method === 'PATCH' && path === '/api/visitors') {
       const body = await req.json().catch(() => ({}));
       const name = sanitizeName(body.name);
+      if (!name) return json({ error: 'Ingresá tu nombre o un apodo.' }, 400);
       const { meta } = await db
         .prepare('UPDATE visitors SET name = ? WHERE token = ?')
         .bind(name, String(body.vt ?? ''))
@@ -544,13 +557,13 @@ const existing = await db
         .prepare(
           `UPDATE event_config SET event_name = ?, event_subtitle = ?, institution_name = ?, description = ?,
                   logo = ?, primary_color = ?, secondary_color = ?, accent_color = ?, background_color = ?,
-                  text_color = ?, text_secondary_color = ?, stamp_style = ?, texts_json = ?,
+                  text_color = ?, text_secondary_color = ?, stamp_style = ?, texts_json = ?, program_json = ?,
                   updated_at = datetime('now') WHERE id = 1`
         )
         .bind(
           c.event_name, c.event_subtitle, c.institution_name, c.description,
           c.logo, c.primary_color, c.secondary_color, c.accent_color, c.background_color,
-          c.text_color, c.text_secondary_color, c.stamp_style, JSON.stringify(c.texts)
+          c.text_color, c.text_secondary_color, c.stamp_style, JSON.stringify(c.texts), JSON.stringify(c.program ?? [])
         )
         .run();
       if (body?.clearLogo) {

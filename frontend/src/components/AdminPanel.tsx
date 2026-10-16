@@ -191,6 +191,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
   // Config draft state
   const [draftConfig, setDraftConfig] = useState<EventConfig>(config);
   const [configSaved, setConfigSaved] = useState(false);
+  const [programText, setProgramText] = useState(() =>
+    (config.program || [])
+      .map(a => [a.time, a.title].filter(Boolean).join(' - ') + (a.note ? ' | ' + a.note : ''))
+      .join('\n')
+  );
   const logoInputRef = useRef<HTMLInputElement>(null);
   const flyerInputRef = useRef<HTMLInputElement>(null);
 
@@ -439,10 +444,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
     }
   };
 
+  const parseProgramText = (text: string) =>
+    text
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .map(line => {
+        const m = line.match(/^(\d{1,2}:\d{2})\s*[-–]?\s*(.*)$/);
+        const rest = m ? m[2] : line;
+        const [title, ...nota] = rest.split('|');
+        return { time: m ? m[1] : '', title: title.trim(), note: nota.join('|').trim() };
+      })
+      .filter(a => a.title);
+
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await updateConfig(draftConfig);
+      await updateConfig({ ...draftConfig, program: parseProgramText(programText) });
       setConfigSaved(true);
       setTimeout(() => setConfigSaved(false), 2500);
     } catch (err: any) {
@@ -1357,25 +1375,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onOpenQR }) => {
             </div>
             <textarea
               rows={5}
-              value={(draftConfig.program || [])
-                .map(a => [a.time, a.title].filter(Boolean).join(' - ') + (a.note ? ' | ' + a.note : ''))
-                .join('\n')}
-              onChange={e =>
-                setDraftConfig(prev => ({
-                  ...prev,
-                  program: e.target.value
-                    .split('\n')
-                    .map(l => l.trim())
-                    .filter(Boolean)
-                    .map(line => {
-                      const m = line.match(/^(\d{1,2}:\d{2})\s*[-–]?\s*(.*)$/);
-                      const rest = m ? m[2] : line;
-                      const [title, ...nota] = rest.split('|');
-                      return { time: m ? m[1] : '', title: title.trim(), note: nota.join('|').trim() };
-                    })
-                    .filter(a => a.title),
-                }))
-              }
+              value={programText}
+              onChange={e => setProgramText(e.target.value)}
               placeholder={'10:00 - Acto de apertura | Patio de actos\n17:30 - Acto de cierre'}
               className="w-full text-xs font-mono p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950/40 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
             />

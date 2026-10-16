@@ -11,7 +11,8 @@
 // pm-v5: invalida el cache pm-v4 (V1.3: biblioteca de sellos reutilizables).
 // pm-v6: recuperación de pasaportes huérfanos (token ya borrado en el servidor).
 // pm-v7: actos de programa (sin stand) y nombre obligatorio (se elimino el ingreso anonimo).
-const VERSION = 'pm-v7';
+// pm-v8: fix textarea del programa (no se borra el texto mientras se escribe).
+const VERSION = 'pm-v8';
 const BASE = self.registration.scope;
 const url = (p) => new URL(p, BASE).href;
 

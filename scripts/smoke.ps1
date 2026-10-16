@@ -624,7 +624,7 @@ Check '90. UI maneja secret_word (React) y offline por palabra' ($bundleSrc -mat
 # espera catalogReady antes de resolver (QR y palabra comparten el mismo flujo
 # seguro). Además los errores distinguen el ORIGEN: catálogo no disponible /
 # datos del dispositivo desactualizados / código no reconocido real.
-Check '91. SW pm-v7 invalida el cache pm-v5 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v7'")
+Check '91. SW pm-v8 invalida el cache pm-v5 y anteriores del catálogo' ($swSrc -match "VERSION = 'pm-v8'")
 Check '92. activate elimina caches que no arrancan con la versión actual' ($swSrc -match '!k\.startsWith\(VERSION\)' -and $swSrc -match 'keys\.filter')
 Check '93. la app React espera el catálogo antes de resolver (Preparando pasaporte...)' ($bundleSrc -match 'Preparando pasaporte' -and $bundleSrc -match 'No se pudo cargar el catálogo')
 Check '94. el SW mantiene networkFirst para /api/stands (red primero)' ($swSrc -match 'networkFirst\(req, DATA_CACHE\)')
